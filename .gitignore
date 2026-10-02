@@ -45,3 +45,7 @@ __pycache__/
 Thumbs.db
 **/share/
 **/Scripts/
+build/
+dist/
+**/build/
+**/dist/
