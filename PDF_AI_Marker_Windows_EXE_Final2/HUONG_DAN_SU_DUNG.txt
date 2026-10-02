@@ -1,0 +1,34 @@
+PDF AI v3 — Chuyển hồ sơ xây dựng PDF sang dữ liệu cho AI (chạy 100% offline)
+==========================================================================
+
+CÀI ĐẶT
+- Giải nén toàn bộ thư mục (cần ~9 GB trống). Giữ nguyên các thư mục engine, llama, models, cache,
+  _internal cạnh PDF_AI_Marker.exe.
+- Chạy PDF_AI_Marker.exe. Không cần cài Python hay kết nối mạng.
+- Nếu chạy trên máy tính Windows mới/máy sạch gặp lỗi thiếu DLL: cài gói Microsoft Visual C++ 2015-2022 Redistributable (x64) từ trang chủ Microsoft (https://aka.ms/vs/17/release/vc_redist.x64.exe).
+- Nên có GPU NVIDIA (driver mới) cho chế độ OCR tiếng Việt có dấu. Máy không có GPU NVIDIA vẫn chạy
+  được các chế độ còn lại.
+
+CHỌN CHẾ ĐỘ
+- [Khuyến dùng] OCR tiếng Việt có dấu (~15–40s/trang, cần GPU NVIDIA): bản vẽ scan, hồ sơ scan,
+  bản vẽ AutoCAD chữ SHX dạng nét vẽ.
+- [Nhanh] Quét OCR không dấu (~5–8s/trang): như trên, không đọc dấu tiếng Việt.
+- [Siêu nhanh] PDF bản gõ / bản vẽ AutoCAD (~0.3–7s/trang): PDF xuất từ Word/Excel/AutoCAD.
+  Tự chuyển font TCVN3 (.VnTime) và VNI (VNI-Times); đọc chú thích "AutoCAD SHX Text";
+  chữ SHX dạng nét vẽ được OCR bổ sung (không dấu).
+
+KẾT QUẢ (mỗi file PDF một thư mục <tên file>_Marker)
+- noi_dung.md        : toàn bộ nội dung, mục lục bản vẽ ở đầu, mỗi trang "## [Trang N]".
+- bang_so_lieu.json  : tất cả bảng số liệu (header / rows / values đã chuẩn hóa số).
+- du_lieu.json       : dữ liệu đầy đủ theo trang (khung tên, bảng, chữ độ tin cậy thấp).
+- chia_doan.jsonl    : các đoạn ~3000 ký tự kèm nguồn/trang/bản vẽ để nạp RAG.
+- can_kiem_tra.md    : chữ/số cần đối chiếu với PDF gốc.
+- goi_y_cho_AI.txt   : gửi kèm cho AI để AI hiểu định dạng số và ký hiệu ⟦OCR khác: ...⟧.
+
+DÒNG LỆNH (tùy chọn)
+  engine\python.exe reprocess_pdf_to_clean_markdown.py "file.pdf" "thu_muc_xuat" all vn_ocr
+  (chế độ: vn_ocr | rapid_ocr | fast_text; trang: all hoặc 1-3,5)
+
+LƯU Ý
+- Số liệu OCR luôn cần đối chiếu PDF gốc, nhất là các mục trong can_kiem_tra.md.
+- Từ điển sửa lỗi riêng: đổi custom_rules.json.example thành custom_rules.json và thêm quy tắc.

@@ -1,0 +1,10 @@
+[
+  {
+    "pattern": "\\bKhaih0ang\\b",
+    "replace": "Khai Hoang"
+  },
+  {
+    "pattern": "\\bTheo\\s*van\\s*ban\\s*so:5X3/sGTVT",
+    "replace": "Theo văn bản số: 513/SGTVT"
+  }
+]

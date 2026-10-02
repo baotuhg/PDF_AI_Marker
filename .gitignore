@@ -1,0 +1,47 @@
+# ==============================================================================
+# ⚠️ BẢO VỆ BẢN QUYỀN THƯƠNG MẠI (TUYỆT ĐỐI KHÔNG PUSH LÊN GITHUB)
+# ==============================================================================
+keygen.py
+*.lic
+pdf_ai.lic
+**/keygen.py
+**/*.lic
+**/pdf_ai.lic
+
+# ==============================================================================
+# THƯ VIỆN NẶNG VÀ AI MODELS (~8.5GB - VƯỢT QUÁ GIỚI HẠN 100MB CỦA GITHUB)
+# (Các thư mục này được phân phối qua link tải trọn gói Google Drive / OneDrive)
+# ==============================================================================
+**/engine/
+**/llama/
+**/models/
+**/cache/
+**/sessions/
+**/_internal/
+**/*.rar
+**/*.zip
+**/*.7z
+**/*.exe
+**/*.dll
+**/*.pyd
+**/*.so
+**/*.dylib
+**/*.gguf
+**/*.bin
+**/*.pt
+**/*.pth
+
+# ==============================================================================
+# PYTHON & IDE CACHE / FILE SAO LƯU TẠM
+# ==============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.bak_*
+*.tmp
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+**/share/
+**/Scripts/
