@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QPushButton, QLineEdit, QTextEdit, QMessageBox, QApplication,
     QFileDialog, QTabWidget, QWidget
 )
-from license_core import save_license, import_license_file, get_connected_usb_serials
+from license_core import save_license, import_license_file, get_connected_usb_serials, verify_license
 
 
 class LicenseDialog(QDialog):
@@ -36,22 +36,41 @@ class LicenseDialog(QDialog):
         layout.setSpacing(14)
         layout.setContentsMargins(28, 22, 28, 22)
 
-        # Header
-        title = QLabel("🔑  Kích hoạt Bản quyền PDF AI Marker v3")
-        title.setFont(QFont("Segoe UI", 14, QFont.Bold))
-        layout.addWidget(title)
+        # Header & Trạng thái bản quyền
+        is_active, _ = verify_license()
+        if is_active:
+            title = QLabel("🔑  Bản quyền PDF AI Marker v3 — [ĐÃ KÍCH HOẠT]")
+            title.setFont(QFont("Segoe UI", 14, QFont.Bold))
+            title.setStyleSheet("color: #1e3a8a;")
+            layout.addWidget(title)
 
-        # Thông báo trạng thái copy tự động
-        copy_notice = QLabel(
-            "✅ <b>Đã tự động sao chép Mã máy vào bộ nhớ tạm (Clipboard)!</b><br>"
-            "Bạn chỉ cần mở Zalo/Email và ấn <b>Ctrl + V</b> để gửi mã kích hoạt."
-        )
-        copy_notice.setTextFormat(Qt.RichText)
-        copy_notice.setStyleSheet(
-            "background: #e8f5e9; color: #1b5e20; border: 1px solid #c8e6c9; "
-            "border-radius: 6px; padding: 10px 14px; font-size: 10pt;"
-        )
-        layout.addWidget(copy_notice)
+            status_notice = QLabel(
+                "🎉 <b>Phần mềm ĐÃ ĐƯỢC KÍCH HOẠT BẢN QUYỀN HỢP LỆ!</b><br>"
+                "Tác giả: <b>Nguyễn Bảo Tú (23HG)</b>  |  Phiên bản: <b>3.0 Commercial</b><br>"
+                "<i>Trạng thái: Hoạt động đầy đủ tính năng. Bạn có thể gia hạn hoặc đổi sang USB nếu cần.</i>"
+            )
+            status_notice.setTextFormat(Qt.RichText)
+            status_notice.setStyleSheet(
+                "background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; "
+                "border-radius: 6px; padding: 10px 14px; font-size: 10pt;"
+            )
+            layout.addWidget(status_notice)
+        else:
+            title = QLabel("🔑  Kích hoạt Bản quyền PDF AI Marker v3")
+            title.setFont(QFont("Segoe UI", 14, QFont.Bold))
+            layout.addWidget(title)
+
+            copy_notice = QLabel(
+                "✅ <b>Đã tự động sao chép Mã máy vào bộ nhớ tạm (Clipboard)!</b><br>"
+                "Tác giả: <b>Nguyễn Bảo Tú (23HG)</b><br>"
+                "Bạn chỉ cần mở Zalo/Email và ấn <b>Ctrl + V</b> để gửi mã kích hoạt."
+            )
+            copy_notice.setTextFormat(Qt.RichText)
+            copy_notice.setStyleSheet(
+                "background: #e8f5e9; color: #1b5e20; border: 1px solid #c8e6c9; "
+                "border-radius: 6px; padding: 10px 14px; font-size: 10pt;"
+            )
+            layout.addWidget(copy_notice)
 
         # Tabs hiển thị mã phần cứng
         tabs = QTabWidget()

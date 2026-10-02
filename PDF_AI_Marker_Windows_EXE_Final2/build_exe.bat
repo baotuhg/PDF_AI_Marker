@@ -6,8 +6,7 @@ echo ===================================================
 
 pyinstaller --onedir --noconsole --name "PDF_AI_Marker" ^
     --icon "app_icon.ico" ^
-    --add-data "license_core.py;." ^
-    --add-data "license_dialog.py;." ^
+    --version-file "version_info.txt" ^
     --add-data "md_postprocess.py;." ^
     --add-data "app_icon.ico;." ^
     --add-data "app_icon.png;." ^

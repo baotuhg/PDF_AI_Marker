@@ -12,7 +12,7 @@ try:
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('PDF_AI_Marker.DesktopApp.3.0')
 except Exception:
     pass
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QLabel, QPushButton, QListWidget, QComboBox, QLineEdit,
@@ -49,7 +49,7 @@ _EXTS = ('.pdf', '.docx', '.xlsx', '.xlsm')  # .doc/.xls đời cũ: chuyển sa
 class App(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('PDF AI 3 • Hồ sơ xây dựng → AI')
+        self.setWindowTitle('PDF AI Marker v3 • Hồ sơ xây dựng sang AI — Tác giả: Nguyễn Bảo Tú (23HG)')
         icon_p = Path(__file__).resolve().parent / 'app_icon.ico'
         if not icon_p.exists():
             icon_p = Path(sys.executable).resolve().parent / 'app_icon.ico'
@@ -80,10 +80,26 @@ class App(QMainWindow):
         layout = QVBoxLayout(central)
         layout.setContentsMargins(26, 22, 26, 22)
         layout.setSpacing(12)
+
+        top_row = QHBoxLayout()
         title = QLabel('PDF → AI  ·  v3')
-        title.setStyleSheet("font: bold 26pt 'Segoe UI';")
-        layout.addWidget(title)
-        layout.addWidget(QLabel('OCR tiếng Việt có dấu, bảng số liệu theo đường kẻ ô, khung tên bản vẽ. Kéo & thả PDF / Word / Excel vào cửa sổ.'))
+        title.setStyleSheet("font: bold 26pt 'Segoe UI'; color: #0f2d59;")
+        top_row.addWidget(title)
+        top_row.addStretch()
+
+        self.btn_license = QPushButton('🔑 Kiểm tra BẢN QUYỀN')
+        self.btn_license.setStyleSheet(
+            "QPushButton { background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe; "
+            "font-weight: 600; padding: 7px 16px; border-radius: 6px; font-size: 10.5pt; } "
+            "QPushButton:hover { background: #e0e7ff; color: #1e1b4b; }"
+        )
+        self.btn_license.clicked.connect(self.show_license_info)
+        top_row.addWidget(self.btn_license)
+        layout.addLayout(top_row)
+
+        desc = QLabel('Tác giả: <b>Nguyễn Bảo Tú (23HG)</b>  ·  OCR tiếng Việt có dấu, bảng số liệu theo đường kẻ ô, khung tên bản vẽ. Kéo & thả PDF / Word / Excel vào cửa sổ.')
+        desc.setTextFormat(Qt.RichText)
+        layout.addWidget(desc)
         row = QHBoxLayout()
         self.add = QPushButton('+ Chọn file (PDF/Word/Excel)')
         self.add.clicked.connect(self.choose)
@@ -234,6 +250,11 @@ class App(QMainWindow):
         path = self.result_dir or Path(self.out.text())
         if path.is_dir():
             os.startfile(str(path))
+
+    def show_license_info(self):
+        ok, machine_id = verify_license()
+        dlg = LicenseDialog(machine_id, self)
+        dlg.exec()
 
     def closeEvent(self, event):
         if self.busy:
