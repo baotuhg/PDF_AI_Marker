@@ -43,14 +43,28 @@ Trong ngành xây dựng (**AEC**), việc ứng dụng Trí tuệ Nhân tạo (
 - Tab **📑 Khung tên**: xem nhanh số hiệu, tên bản vẽ, tỷ lệ… của từng trang.
 - Hỗ trợ trang xoay, PDF có mật khẩu, bản vẽ khổ lớn A0/A1. Kỹ sư **nghiệm thu số liệu nhanh gấp nhiều lần** thay vì dò bằng mắt từng bản vẽ.
 
-### 1. OCR Tiếng Việt Có Dấu Đa Tầng (Multi-Engine AI)
+### 🆕 1. Trợ Lý AI Công Trình (Offline Local RAG Chat)
+<p align="center">
+  <img src="PDF_AI_Marker_Windows_EXE_Final2/chat_preview.png" alt="Trợ lý AI Công Trình - Hỏi đáp thông minh với hồ sơ và trích dẫn bản vẽ trực quan" width="850">
+</p>
+
+- **Hỏi đáp thông minh 100% Cục bộ:** Tra cứu trực tiếp với toàn bộ hồ sơ thiết kế, bảng khối lượng thép, dự toán và thuyết minh kỹ thuật vừa chuyển đổi.
+- **Trích dẫn nguồn cực chuẩn `[Trang X • Bản vẽ Y]`:** Nhấp chuột vào bất kỳ trích dẫn nào trong câu trả lời để **mở ngay bản vẽ gốc và khoanh đỏ số liệu** tại cửa sổ đối chiếu trực quan.
+- **Đa dạng tùy chọn Backend AI:**
+  - ⚡ **Local llama-server (Tích hợp sẵn):** Tự động phát hiện và chạy mô hình `.gguf` cục bộ trên GPU NVIDIA CUDA không cần cài thêm phần mềm.
+  - 🔌 **LM Studio / Ollama:** Kết nối mượt mà API cục bộ `http://127.0.0.1:1234/v1` hoặc `11434`.
+  - ☁️ **Cloud API:** Tương thích chuẩn OpenAI / DeepSeek / Gemini khi cần sức mạnh mô hình lớn trên đám mây.
+  - 🔍 **Tra cứu thông minh tức thì (Offline - Không cần LLM):** Tự động truy xuất bảng số liệu, khối lượng và đoạn trích liên quan ngay lập tức mà không cần tải mô hình AI nặng.
+- **Xuất biên bản Q&A:** Nút xuất file `.md` lưu toàn bộ lịch sử hỏi đáp thành biên bản rà soát kỹ thuật hồ sơ dự án.
+
+### 2. OCR Tiếng Việt Có Dấu Đa Tầng (Multi-Engine AI)
 - Tích hợp mô hình AI thị giác chuyên sâu, nhận diện tiếng Việt có dấu chuẩn xác ngay cả trên bản vẽ scan độ phân giải cao hoặc bản vẽ in lại nhiều lần.
 - Tự động nhận diện và dịch mã font chữ chuyên dụng ngành xây dựng:
   - Font kỹ thuật AutoCAD: **AutoCAD SHX Text** (kể cả font nét vẽ vector SHX).
   - Font chữ cũ trong hồ sơ lưu trữ: **TCVN3 (.VnTime, .VnTimeH)** và **VNI (VNI-Times)** sang chuẩn Unicode dựng sẵn.
 - **Kiểm tra chéo chữ số thông minh:** Tự động đối chiếu chéo số liệu giữa 2 bộ engine OCR độc lập. Các vị trí có sự sai lệch sẽ được đánh dấu cờ cảnh báo `⟦OCR khác: ...⟧` để kỹ sư rà soát dễ dàng, chống nhầm lẫn số liệu đo đạc / dự toán.
 
-### 2. Dựng Ma Trận Bảng Biểu & Xuất Trực Tiếp Ra Excel (.xlsx)
+### 3. Dựng Ma Trận Bảng Biểu & Xuất Trực Tiếp Ra Excel (.xlsx)
 - Tự động phát hiện hệ lưới đường kẻ ô (Table Grid Line Detection), phục hồi nguyên vẹn ma trận hàng - cột.
 - Chuẩn hóa định dạng số: tự động nhận diện dấu phẩy/chấm thập phân kiểu Việt Nam và quốc tế.
 - **Xuất đồng thời bảng tính Excel (`bang_so_lieu.xlsx`):** Tự động kẻ viền border, in đậm hàng tiêu đề, định dạng cột số chuẩn xác để kỹ sư mở Excel là tính toán và dùng hàm `SUM()` được ngay.
@@ -60,28 +74,28 @@ Trong ngành xây dựng (**AEC**), việc ứng dụng Trí tuệ Nhân tạo (
   - `bang_so_lieu.json`: Toàn bộ bảng biểu trích xuất dưới dạng mảng JSON (headers, rows, numeric values).
   - `du_lieu.json`: Metadata chi tiết từng trang, tọa độ bounding box, độ tin cậy OCR.
 
-### 3. Tự Động Bóc Tách Khung Tên & Lập Mục Lục Bản Vẽ
+### 4. Tự Động Bóc Tách Khung Tên & Lập Mục Lục Bản Vẽ
 - Nhận diện vị trí khung tên kỹ thuật (Title Block) ở các góc bản vẽ.
 - Tự động trích xuất các trường thông tin: *Số hiệu bản vẽ*, *Tên bản vẽ*, *Hạng mục*, *Tỷ lệ thiết kế*.
 - Tự động biên soạn danh mục **"Mục lục bản vẽ"** có neo liên kết (anchor) ngay đầu file Markdown giúp tra cứu tức thì.
 
-### 4. Đọc Trực Tiếp Tài Liệu Office (Word & Excel)
+### 5. Đọc Trực Tiếp Tài Liệu Office (Word & Excel)
 - Hỗ trợ trực tiếp các file `.docx`, `.xlsx`, `.xlsm` mà không cần xuất qua PDF hay qua bước OCR.
 - Xử lý các ô gộp (merged cells) thông minh, giữ nguyên thứ bậc phân cấp cây thư mục (WBS) trong bảng tính dự toán và thuyết minh kỹ thuật.
 
-### 5. Phân Đoạn Thông Minh (Smart Chunking) Sẵn Sàng Cho RAG AI
+### 6. Phân Đoạn Thông Minh (Smart Chunking) Sẵn Sàng Cho RAG AI
 - Tự động cắt tài liệu thành các phân đoạn tối ưu (~3.000 ký tự) theo ranh giới đoạn văn và trang bản vẽ.
 - Xuất file chuẩn `chia_doan.jsonl` kèm metadata nguồn gốc (*tên file, số trang, tên bản vẽ*), nạp trực tiếp vào các hệ thống Vector Database (Chroma, Qdrant, Milvus, Pinecone) hoặc các nền tảng AI Agent (LangChain, LlamaIndex, Dify).
 
-### 6. Quét Thư Mục Hàng Loạt (Batch Folder Processing)
+### 7. Quét Thư Mục Hàng Loạt (Batch Folder Processing)
 - Hỗ trợ bấm nút **`📁 Chọn Thư mục (Batch)`** hoặc kéo thả trực tiếp cả Folder dự án vào cửa sổ phần mềm.
 - Tự động quét đệ quy tất cả các file PDF, Word (.docx) và Excel (.xlsx, .xlsm) trong các thư mục con để đưa vào hàng đợi xử lý liên tục.
 
-### 7. Chế Độ Dùng Thử Tự Động (Auto-Trial 3 Ngày)
+### 8. Chế Độ Dùng Thử Tự Động (Auto-Trial 3 Ngày)
 - Khách hàng mới tải về được kích hoạt ngay **3 ngày Dùng Thử Miễn Phí** với 100% tính năng mà không cần nhập key trước.
 - Trải nghiệm trọn vẹn tốc độ và độ chính xác của AI trước khi quyết định đăng ký bản quyền vĩnh viễn.
 
-### 8. Bảo Mật Tuyệt Đối — 100% Chạy Offline
+### 9. Bảo Mật Tuyệt Đối — 100% Chạy Offline
 - Không kết nối Internet, không gửi dữ liệu ra bên ngoài.
 - Tận dụng sức mạnh phần cứng máy tính: tăng tốc bằng card đồ họa rời NVIDIA (CUDA) hoặc tối ưu hóa trên CPU đa nhân.
 

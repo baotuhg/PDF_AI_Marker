@@ -383,16 +383,11 @@ class LlamaServerManager:
         ]
 
         try:
-            # Tạo tiến trình nền ẩn cửa sổ cmd
-            creation_flags = 0
-            if sys.platform == "win32":
-                creation_flags = subprocess.CREATE_NO_WINDOW
-
+            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
             self.process = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 creationflags=creation_flags
             )
         except Exception as e:
@@ -402,9 +397,7 @@ class LlamaServerManager:
         t0 = time.time()
         while time.time() - t0 < 30:
             if self.process.poll() is not None:
-                # Tiến trình bị crash
-                out, _ = self.process.communicate(timeout=2)
-                return False, f"Server bị tắt sớm: {out[:1000]}"
+                return False, f"Server bị tắt sớm với mã thoát: {self.process.returncode}"
             try:
                 req = urllib.request.Request(f"http://127.0.0.1:{self.port}/health")
                 with urllib.request.urlopen(req, timeout=1.0) as res:

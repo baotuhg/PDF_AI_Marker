@@ -86,6 +86,8 @@ class ChatWorker(QThread):
                         if choices:
                             delta = choices[0].get("delta") or {}
                             content = delta.get("content") or ""
+                            if not content and delta.get("reasoning_content"):
+                                content = delta.get("reasoning_content")
                             if content:
                                 full_response.append(content)
                                 self.chunk_received.emit(content)
@@ -420,10 +422,19 @@ class ChatWindow(QMainWindow):
         if folder:
             self.load_project(folder)
 
-    def load_project(self, folder_path: str):
+    def load_project(self, folder_path: str, silent: bool = False):
         folder = Path(folder_path)
+        # Tự động tìm thư mục con *_Marker nếu người dùng chọn thư mục cha
+        if not (folder / "chia_doan.jsonl").exists() and not (folder / "bang_so_lieu.json").exists():
+            sub = next((d for d in folder.glob("*_Marker") if (d / "chia_doan.jsonl").exists() or (d / "bang_so_lieu.json").exists()), None)
+            if not sub:
+                sub = next((d for d in folder.iterdir() if d.is_dir() and ((d / "chia_doan.jsonl").exists() or (d / "bang_so_lieu.json").exists())), None)
+            if sub:
+                folder = sub
+
         if not self.kb.load(str(folder)):
-            QMessageBox.warning(self, "Không có dữ liệu", f"Thư mục này không chứa kết quả phân tích:\n{folder}")
+            if not silent:
+                QMessageBox.warning(self, "Không có dữ liệu", f"Thư mục này không chứa kết quả phân tích:\n{folder}")
             return False
 
         self.current_folder = folder

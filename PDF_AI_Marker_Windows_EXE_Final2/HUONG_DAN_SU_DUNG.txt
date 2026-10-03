@@ -43,6 +43,17 @@ KẾT QUẢ (mỗi file PDF một thư mục <tên file>_Marker)
 - Tab "📑 Khung tên": số hiệu, tên bản vẽ, tỷ lệ… của trang đang xem.
 - Nếu đã di chuyển file PDF gốc: bấm "📄 Chọn PDF gốc…" để chỉ lại file.
 
+TRỢ LÝ AI CÔNG TRÌNH (RAG CHAT - MỚI)
+- Sau khi chuyển đổi xong, bấm nút "🤖 Trợ lý AI (RAG)" trên giao diện chính (hoặc bấm từ cửa sổ Đối Chiếu).
+- Đặt câu hỏi trực tiếp về hồ sơ (quy mô, thống kê khối lượng thép, mác bê tông, tiêu chuẩn thi công...).
+- Nhấp vào các liên kết [Trang X] trong câu trả lời để mở ngay bản vẽ gốc khoanh đỏ số liệu.
+- Hỗ trợ 4 chế độ thông minh:
+  1. AI Offline (llama-server): nạp mô hình .gguf chạy 100% cục bộ trên card màn hình rời NVIDIA (CUDA).
+  2. Kết nối LM Studio (http://127.0.0.1:1234/v1).
+  3. Kết nối Ollama (http://127.0.0.1:11434/v1).
+  4. Tra cứu thông minh: trích xuất bảng số liệu và đoạn trích tức thì không cần nạp mô hình AI.
+- Bấm "📄 Xuất biên bản Q&A (.md)" để lưu toàn bộ nội dung hỏi đáp phục vụ nghiệm thu hồ sơ.
+
 DÒNG LỆNH (tùy chọn)
   engine\python.exe reprocess_pdf_to_clean_markdown.py "file.pdf" "thu_muc_xuat" all vn_ocr
   (chế độ: vn_ocr | rapid_ocr | fast_text; trang: all hoặc 1-3,5)
