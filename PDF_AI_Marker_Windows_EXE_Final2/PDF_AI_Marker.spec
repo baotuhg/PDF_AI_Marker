@@ -7,6 +7,7 @@ block_cipher = None
 added_files = [
     ('fluent_theme.py', '.'),
     ('theme_config.json', '.'),
+    ('table_agent.py', '.'),
     ('license_core.py', '.'),
     ('license_dialog.py', '.'),
     ('license_cloud.py', '.'),
@@ -25,6 +26,7 @@ a = Analysis(
     datas=added_files,
     hiddenimports=[
         'fluent_theme',
+        'table_agent',
         'license_core',
         'license_dialog',
         'license_cloud',

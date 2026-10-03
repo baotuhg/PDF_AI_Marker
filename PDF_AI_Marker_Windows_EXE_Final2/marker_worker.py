@@ -620,19 +620,33 @@ def write_outputs(result, mode, source, total, pages, chunks, total_sec, max_cha
         tables = [{"page": p["page"], "sheet": (p.get("metadata") or {}).get("so_hieu_ban_ve"),
                    "sheet_title": (p.get("metadata") or {}).get("ten_ban_ve"), **t}
                   for p in pages for t in (p.get("tables") or [])]
-        (result / "bang_so_lieu.json").write_text(json.dumps(tables, ensure_ascii=False, indent=2), encoding="utf-8")
         try:
-            export_tables_to_excel(tables, result / "bang_so_lieu.xlsx")
+            from table_agent import AECTableClassifier, AECTableAuditor, export_aec_excel, export_specialized_jsons
+            for tbl in tables:
+                cat, cat_name, conf = AECTableClassifier.classify(tbl)
+                tbl["category"] = cat
+                tbl["category_name"] = cat_name
+                tbl["confidence"] = round(conf, 2)
+                tbl["audit"] = AECTableAuditor.audit(tbl, cat)
+            export_aec_excel(tables, result / "bang_so_lieu.xlsx")
+            export_specialized_jsons(tables, result)
         except Exception as e:
-            emit("progress", message=f"[Cảnh báo xuất Excel: {e}]")
+            emit("progress", message=f"[Cảnh báo AEC Table Agent: {e}]")
+            try:
+                export_tables_to_excel(tables, result / "bang_so_lieu.xlsx")
+            except Exception:
+                pass
+        (result / "bang_so_lieu.json").write_text(json.dumps(tables, ensure_ascii=False, indent=2), encoding="utf-8")
         (result / "can_kiem_tra.md").write_text(review_markdown(pages), encoding="utf-8")
     (result / "goi_y_cho_AI.txt").write_text(AI_GUIDE, encoding="utf-8")
     if v3:
         guide = ("noi_dung.md: Markdown toàn bộ tài liệu (mục lục bản vẽ ở đầu, mỗi trang '## [Trang N]').\n"
                  "noi_dung.txt: văn bản thuần theo trang.\n"
                  "du_lieu.json: dữ liệu đầy đủ theo trang (metadata khung tên, bảng, chữ độ tin cậy thấp).\n"
-                 "bang_so_lieu.json: TẤT CẢ bảng số liệu, có header/rows/values (số đã chuẩn hóa).\n"
-                 "bang_so_lieu.xlsx: BẢNG TÍNH EXCEL chuẩn mẫu (kẻ ô viền, định dạng số, in đậm tiêu đề).\n"
+                 "bang_so_lieu.json: TẤT CẢ bảng số liệu đã phân loại (Cốt thép, BoQ, Danh mục, Tọa độ) kèm audit.\n"
+                 "bang_so_lieu.xlsx: BẢNG TÍNH EXCEL chuẩn AEC đa cấp (Mục lục hyperlink, Sheet tổng hợp thép/BoQ/tọa độ, Sheet chi tiết).\n"
+                 "thep_cho_to_hop_cat.json: Danh sách thanh cốt thép chuẩn format nạp thẳng vào aec-rebar-optimizer.\n"
+                 "tien_luong_du_toan_boq.json: Bảng khối lượng chuẩn format nạp vào aec-cost-tender.\n"
                  "chia_doan.jsonl: các đoạn ~3000 ký tự kèm nguồn/trang/bản vẽ để nạp RAG.\n"
                  "can_kiem_tra.md: danh sách chữ/số cần đối chiếu PDF gốc.\n"
                  "goi_y_cho_AI.txt: hướng dẫn đọc cho AI (định dạng số, ký hiệu).\n")

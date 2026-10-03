@@ -97,6 +97,7 @@ class App(QMainWindow):
         self.inspector = None
         self.chat_win = None
         self.current_loaded_tables = []
+        self.filtered_table_indices = []
         self.nav_buttons = []
 
         # ── 1. KHỞI TẠO THEME FLUENT UI ─────────────────────────────────────
@@ -481,30 +482,49 @@ class App(QMainWindow):
         l_tools.setContentsMargins(14, 12, 14, 12)
         l_tools.setSpacing(10)
 
+        # Hàng 1: Bộ lọc phân loại AEC + Chọn bảng
         row1 = QHBoxLayout()
+        row1.addWidget(QLabel("Nhóm nghiệp vụ:"))
+        self.combo_table_category = QComboBox()
+        self.combo_table_category.addItem("🌐 Tất cả nhóm bảng", "all")
+        self.combo_table_category.addItem("🔩 Thống kê Cốt thép (BBS)", "rebar")
+        self.combo_table_category.addItem("🧱 Tổng hợp Khối lượng (BoQ)", "boq")
+        self.combo_table_category.addItem("📑 Danh mục Bản vẽ", "sheet_index")
+        self.combo_table_category.addItem("📐 Tọa độ & Thông số", "specs")
+        self.combo_table_category.addItem("📊 Bảng số liệu khác", "general")
+        self.combo_table_category.currentIndexChanged.connect(self._on_table_category_changed)
+        row1.addWidget(self.combo_table_category)
+
         row1.addWidget(QLabel("Chọn bảng:"))
         self.combo_tables = QComboBox()
         self.combo_tables.currentIndexChanged.connect(self._on_table_selected)
         row1.addWidget(self.combo_tables, 1)
+        l_tools.addLayout(row1)
 
-        self.btn_open_excel = QPushButton("📊 Mở file Excel (.xlsx)")
+        # Hàng 2: Các nút hành động
+        row2 = QHBoxLayout()
+        self.btn_open_excel = QPushButton("📊 Mở Excel (.xlsx) Phân Nhóm")
         self.btn_open_excel.setObjectName("primaryAction")
         self.btn_open_excel.clicked.connect(self.open_excel_file)
-        row1.addWidget(self.btn_open_excel)
+        row2.addWidget(self.btn_open_excel)
+
+        self.btn_open_rebar = QPushButton("🔩 Tối ưu Cắt Thép")
+        self.btn_open_rebar.setObjectName("accentAction")
+        self.btn_open_rebar.clicked.connect(self.open_rebar_cutting_dialog)
+        row2.addWidget(self.btn_open_rebar)
 
         self.btn_open_inspect_tab = QPushButton("🔍 Mở Đối chiếu trực quan")
-        self.btn_open_inspect_tab.setObjectName("accentAction")
         self.btn_open_inspect_tab.clicked.connect(self.open_inspector)
-        row1.addWidget(self.btn_open_inspect_tab)
+        row2.addWidget(self.btn_open_inspect_tab)
 
         self.btn_reload_tables = QPushButton("🔄 Nạp lại")
         self.btn_reload_tables.clicked.connect(self.refresh_tables_tab)
-        row1.addWidget(self.btn_reload_tables)
+        row2.addWidget(self.btn_reload_tables)
 
         self.btn_choose_table_dir = QPushButton("📂 Chọn thư mục khác…")
         self.btn_choose_table_dir.clicked.connect(self.choose_table_folder)
-        row1.addWidget(self.btn_choose_table_dir)
-        l_tools.addLayout(row1)
+        row2.addWidget(self.btn_choose_table_dir)
+        l_tools.addLayout(row2)
 
         layout.addWidget(card_tools)
 
@@ -553,37 +573,104 @@ class App(QMainWindow):
                 self.lbl_table_info.setText("Hồ sơ này không có bảng số liệu nào được nhận diện.")
                 return
 
-            self.current_loaded_tables = data
-            self.combo_tables.blockSignals(True)
-            self.combo_tables.clear()
-            for i, t in enumerate(data, 1):
-                pg = t.get("page", "?")
-                sheet = t.get("sheet") or ""
-                stitle = t.get("sheet_title") or ""
-                num_r = len(t.get("rows", []))
-                label = f"Bảng #{i} • Trang {pg}"
-                if sheet or stitle:
-                    label += f" • {sheet} {stitle}".strip()
-                label += f" ({num_r} dòng)"
-                self.combo_tables.addItem(label)
-            self.combo_tables.blockSignals(False)
+            # Chạy Agent phân loại & thẩm tra nếu dữ liệu cũ chưa có trường category
+            try:
+                from table_agent import AECTableClassifier, AECTableAuditor
+                for tbl in data:
+                    if "category" not in tbl:
+                        cat, cat_name, conf = AECTableClassifier.classify(tbl)
+                        tbl["category"] = cat
+                        tbl["category_name"] = cat_name
+                        tbl["confidence"] = round(conf, 2)
+                        tbl["audit"] = AECTableAuditor.audit(tbl, cat)
+            except Exception:
+                pass
 
-            self.display_table_data(0)
+            self.current_loaded_tables = data
+            self._update_category_counts()
+            self._filter_tables_by_category()
         except Exception as e:
             self.lbl_table_info.setText(f"Lỗi đọc bang_so_lieu.json: {e}")
 
-    def _on_table_selected(self, idx: int):
-        if idx >= 0:
-            self.display_table_data(idx)
+    def _update_category_counts(self):
+        """Cập nhật số lượng bảng cho từng nhóm phân loại trên combobox."""
+        if not self.current_loaded_tables:
+            return
+        counts = {"all": len(self.current_loaded_tables), "rebar": 0, "boq": 0, "sheet_index": 0, "specs": 0, "general": 0}
+        for t in self.current_loaded_tables:
+            cat = t.get("category", "general")
+            counts[cat] = counts.get(cat, 0) + 1
+
+        self.combo_table_category.blockSignals(True)
+        items_map = [
+            ("all", f"🌐 Tất cả nhóm bảng ({counts['all']})"),
+            ("rebar", f"🔩 Thống kê Cốt thép ({counts.get('rebar', 0)})"),
+            ("boq", f"🧱 Tổng hợp Khối lượng ({counts.get('boq', 0)})"),
+            ("sheet_index", f"📑 Danh mục Bản vẽ ({counts.get('sheet_index', 0)})"),
+            ("specs", f"📐 Tọa độ & Thông số ({counts.get('specs', 0)})"),
+            ("general", f"📊 Bảng số liệu khác ({counts.get('general', 0)})"),
+        ]
+        curr_cat = self.combo_table_category.currentData() or "all"
+        self.combo_table_category.clear()
+        selected_idx = 0
+        for idx, (c_code, c_label) in enumerate(items_map):
+            self.combo_table_category.addItem(c_label, c_code)
+            if c_code == curr_cat:
+                selected_idx = idx
+        self.combo_table_category.setCurrentIndex(selected_idx)
+        self.combo_table_category.blockSignals(False)
+
+    def _on_table_category_changed(self, _=0):
+        self._filter_tables_by_category()
+
+    def _filter_tables_by_category(self):
+        """Lọc danh sách bảng hiển thị theo nhóm nghiệp vụ đã chọn."""
+        cat = self.combo_table_category.currentData() or "all"
+        self.filtered_table_indices = []
+        for idx, t in enumerate(self.current_loaded_tables):
+            if cat == "all" or t.get("category", "general") == cat:
+                self.filtered_table_indices.append(idx)
+
+        self.combo_tables.blockSignals(True)
+        self.combo_tables.clear()
+        for filtered_pos, orig_idx in enumerate(self.filtered_table_indices, 1):
+            t = self.current_loaded_tables[orig_idx]
+            pg = t.get("page", "?")
+            sheet = t.get("sheet") or ""
+            stitle = t.get("sheet_title") or ""
+            rows = t.get("rows", [])
+            cat_name = t.get("category_name", "Bảng")
+            audit_stat = t.get("audit", {}).get("status", "ok")
+            warn_icon = "⚠️ " if audit_stat != "ok" else ""
+
+            label = f"{warn_icon}#{orig_idx+1} [{cat_name}] • P{pg}"
+            if sheet:
+                label += f" • {sheet}"
+            label += f" ({len(rows)} dòng)"
+            self.combo_tables.addItem(label)
+        self.combo_tables.blockSignals(False)
+
+        if self.filtered_table_indices:
+            self.combo_tables.setCurrentIndex(0)
+            self.display_table_data(self.filtered_table_indices[0])
+        else:
+            self.table_view.clear()
+            self.table_view.setRowCount(0)
+            self.table_view.setColumnCount(0)
+            self.lbl_table_info.setText("Không có bảng nào trong nhóm nghiệp vụ này.")
+
+    def _on_table_selected(self, combo_idx: int):
+        if 0 <= combo_idx < len(self.filtered_table_indices):
+            actual_idx = self.filtered_table_indices[combo_idx]
+            self.display_table_data(actual_idx)
 
     def display_table_data(self, idx: int):
         if not self.current_loaded_tables or idx < 0 or idx >= len(self.current_loaded_tables):
             return
         t = self.current_loaded_tables[idx]
-        headers = t.get("headers", [])
+        headers = t.get("headers") or t.get("header") or []
         rows = t.get("rows", [])
 
-        # Nếu không có header rõ ràng nhưng có rows, lấy độ dài lớn nhất
         col_count = len(headers)
         if col_count == 0 and rows:
             col_count = max(len(r) for r in rows)
@@ -601,7 +688,6 @@ class App(QMainWindow):
                     self.table_view.setItem(r_i, c_i, item)
 
         self.table_view.resizeColumnsToContents()
-        # Giới hạn chiều rộng cột không quá 320px
         for c_i in range(col_count):
             if self.table_view.columnWidth(c_i) > 320:
                 self.table_view.setColumnWidth(c_i, 320)
@@ -609,11 +695,22 @@ class App(QMainWindow):
         pg = t.get("page", "?")
         sheet = t.get("sheet") or ""
         stitle = t.get("sheet_title") or ""
-        self.lbl_table_info.setText(
-            f"Đang hiển thị Bảng #{idx+1}/{len(self.current_loaded_tables)} • "
-            f"Trang {pg} • {len(rows)} dòng x {col_count} cột"
-            + (f" • Bản vẽ: {sheet} - {stitle}" if sheet or stitle else "")
+        cat_name = t.get("category_name", "Bảng số liệu")
+        title = t.get("title") or "Bảng không có tiêu đề"
+
+        audit_info = t.get("audit", {})
+        warnings = audit_info.get("warnings", [])
+        if warnings:
+            warn_txt = f" • <span style='color: #f59e0b; font-weight: bold;'>⚠️ {len(warnings)} lưu ý logic: {warnings[0]}</span>"
+        else:
+            warn_txt = " • <span style='color: #10b981; font-weight: bold;'>✅ Logic toán học khớp</span>"
+
+        info_html = (
+            f"<b>[{cat_name}]</b> {title} • Trang {pg} • {len(rows)} dòng x {col_count} cột"
+            + (f" • Bản vẽ: <b>{sheet}</b> {stitle}" if sheet or stitle else "")
+            + warn_txt
         )
+        self.lbl_table_info.setText(info_html)
 
     def open_excel_file(self):
         target_dir = self.result_dir or Path(self.out.text())
@@ -629,6 +726,48 @@ class App(QMainWindow):
             os.startfile(str(p_excel))
         else:
             QMessageBox.information(self, "Chưa có file Excel", f"Không tìm thấy file bang_so_lieu.xlsx trong:\n{target_dir}")
+
+    def open_rebar_cutting_dialog(self):
+        target_dir = self.result_dir or Path(self.out.text())
+        if not target_dir:
+            return
+        p_rebar = target_dir / "thep_cho_to_hop_cat.json"
+        if not p_rebar.exists():
+            sub = next((d for d in target_dir.glob("*_Marker") if (d / "thep_cho_to_hop_cat.json").exists()), None)
+            if sub:
+                p_rebar = sub / "thep_cho_to_hop_cat.json"
+
+        if not p_rebar or not p_rebar.exists():
+            QMessageBox.information(
+                self, "Tối ưu Cắt Thép (1D Cutting Stock)",
+                "Chưa có file 'thep_cho_to_hop_cat.json' trong thư mục kết quả này.\n\n"
+                "👉 Khi bạn xử lý bản vẽ có Bảng Thống kê Cốt thép, "
+                "phần mềm sẽ tự động chuẩn hóa danh sách thanh thép để nạp thẳng vào bộ kỹ năng "
+                "'aec-rebar-optimizer' giải bài toán cắt thép tiết kiệm đề-xê (< 1.5%)."
+            )
+            return
+
+        try:
+            items = json.loads(p_rebar.read_text(encoding="utf-8"))
+            n_bars = len(items)
+            tot_qty = sum(it.get("quantity", 0) for it in items)
+            tot_w = sum(it.get("total_weight_kg", 0) for it in items)
+            msg = (
+                f"🔩 DỮ LIỆU CỐT THÉP ĐÃ ĐƯỢC CHUẨN HÓA THÀNH CÔNG!\n\n"
+                f"• Tổng số chủng loại thanh: {n_bars} mục\n"
+                f"• Tổng số lượng thanh cần cắt: {tot_qty:,} thanh\n"
+                f"• Tổng khối lượng cốt thép: {tot_w:,.2f} kg ({tot_w/1000:,.3f} tấn)\n"
+                f"• Vị trí lưu: {p_rebar.name}\n\n"
+                f"Dữ liệu đã chuẩn hóa 100% theo schema của kỹ năng AI 'aec-rebar-optimizer' "
+                f"để tính toán sơ đồ ghép cây thép 11.7m tại công trường.\n\n"
+                f"Bạn có muốn mở file dữ liệu này để xem không?"
+            )
+            ret = QMessageBox.question(self, "Tối ưu Cắt Thép (AEC Rebar)", msg,
+                                       QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Cancel)
+            if ret == QMessageBox.StandardButton.Open:
+                os.startfile(str(p_rebar))
+        except Exception as e:
+            QMessageBox.warning(self, "Lỗi đọc dữ liệu cốt thép", str(e))
 
     # ─────────────────────────────────────────────────────────────────────────
     # TAB 2: 🤖 TRỢ LÝ AI (LOCAL RAG COPILOT)

@@ -44,9 +44,46 @@ def _digits(text: str) -> str:
     return "".join(re.findall(r"\d", cleaned))
 
 
+TITLE_BLOCK_ADMIN_KEYWORDS = [
+    "CONGTY", "CHUDAUTU", "GIAMDOC", "CHUNHIEM", "CHUTRI", "NGUOIVE",
+    "KIEMTRA", "GIAIDOAN", "THIETKE", "BANVE", "TYLE", "NGAY", "KYTEN",
+    "HOVATEN", "PHEDUYET", "THAMDINH", "HANGMUC", "GOITHAU", "DUAN",
+    "CONGTRINH", "SCALE", "DATE", "DWG", "REV", "SHEET", "CAD"
+]
+
+
+def is_title_block_or_margin_box(box, text: str, W: int, H: int) -> bool:
+    """Bỏ qua khung viền bìa ngoài, lề trắng và chữ hành chính lặp lại trong khung tên."""
+    xs = [float(p[0]) for p in box]
+    ys = [float(p[1]) for p in box]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+
+    # 1. Mép lề trắng ngoài cùng bản vẽ (border margins)
+    if min_x <= 0.02 * W or max_x >= 0.98 * W or min_y <= 0.02 * H or max_y >= 0.98 * H:
+        return True
+
+    # 2. Vùng Khung tên bản vẽ (góc dưới phải hoặc dải mép phải)
+    in_tb_zone = (min_x >= 0.65 * W and min_y >= 0.68 * H) or (min_x >= 0.82 * W)
+    if in_tb_zone:
+        k = re.sub(r"[^A-Z]", "", strip_accents(text).upper())
+        if any(kw in k for kw in TITLE_BLOCK_ADMIN_KEYWORDS):
+            return True
+
+    return False
+
+
 def needs_refine(text: str) -> bool:
-    """Chỉ gửi ô có cụm >= 2 chữ cái; mã hiệu kiểu 'A2-D14-200' giữ bản RapidOCR."""
-    return bool(re.search(r"[A-Za-z]{2,}", text))
+    """Chỉ gửi ô chữ có khả năng là tiếng Việt cần phục hồi dấu.
+    Bỏ qua mã hiệu kỹ thuật và số đo như D14, KC-01, 1500x200, STT..."""
+    words = re.findall(r"[A-Za-zÀ-ỹ]{2,}", text)
+    if not words:
+        return False
+    skip_codes = {"STT", "TL", "KC", "DA", "CT", "TCVN", "CAD", "PDF", "OK", "REV",
+                  "D10", "D12", "D14", "D16", "D18", "D20", "D22", "D25", "D28", "D32",
+                  "CB300", "CB400", "CIII", "CII"}
+    meaningful = [w for w in words if w.upper() not in skip_codes and re.search(r"[aeiouyAEIOUYà-ỹĂ-Ỹ]", w)]
+    return len(meaningful) > 0
 
 
 def _html_to_text(html: str) -> str:
@@ -76,7 +113,7 @@ class SuryaRefiner:
 
     def __init__(self):
         self._manager = None
-        self.stats = {"sent": 0, "accepted": 0, "rejected": 0, "digits_differ": 0}
+        self.stats = {"sent": 0, "accepted": 0, "rejected": 0, "digits_differ": 0, "skipped_title": 0}
 
     def _get_manager(self):
         if self._manager is None:
@@ -92,6 +129,10 @@ class SuryaRefiner:
         for idx, entry in enumerate(results):
             text = str(entry[1])
             if not needs_refine(text):
+                continue
+            # Bỏ qua khung viền bìa và chữ hành chính lặp lại trong khung tên
+            if is_title_block_or_margin_box(entry[0], text, W, H):
+                self.stats["skipped_title"] = self.stats.get("skipped_title", 0) + 1
                 continue
             xs = [p[0] for p in entry[0]]
             ys = [p[1] for p in entry[0]]
