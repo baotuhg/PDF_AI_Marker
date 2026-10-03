@@ -249,6 +249,11 @@ class InspectorWindow(QMainWindow):
         self.btn_pdf = QPushButton("📄 Chọn PDF gốc…")
         self.btn_pdf.clicked.connect(self.choose_pdf)
         bar.addWidget(self.btn_pdf)
+        self.btn_chat = QPushButton("🤖 Trợ lý AI")
+        self.btn_chat.setToolTip("Mở cửa sổ hỏi đáp thông minh RAG với hồ sơ này")
+        self.btn_chat.setStyleSheet("QPushButton { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; font-weight: 600; } QPushButton:hover { background: #dbeafe; }")
+        self.btn_chat.clicked.connect(self.open_chat)
+        bar.addWidget(self.btn_chat)
         self.lbl_file = QLabel("Chưa mở kết quả")
         self.lbl_file.setStyleSheet("font-weight: 600; color: #0f2d59; padding-left: 8px;")
         bar.addWidget(self.lbl_file, 1)
@@ -485,6 +490,20 @@ class InspectorWindow(QMainWindow):
             self._open_pdf(f)
             if self.page_pos >= 0:
                 self.show_page(self.page_pos, force=True)
+
+    def open_chat(self):
+        try:
+            from chat_window import ChatWindow
+        except Exception as e:
+            QMessageBox.warning(self, "Lỗi Trợ lý AI", f"Không mở được Trợ lý AI:\n{e}")
+            return
+        if not hasattr(self, "_chat_window") or self._chat_window is None:
+            self._chat_window = ChatWindow(self, inspector_window=self)
+        if self.result_dir:
+            self._chat_window.load_project(str(self.result_dir))
+        self._chat_window.show()
+        self._chat_window.raise_()
+        self._chat_window.activateWindow()
 
     # ── trang ────────────────────────────────────────────────────────────
     def _geom(self, rec):

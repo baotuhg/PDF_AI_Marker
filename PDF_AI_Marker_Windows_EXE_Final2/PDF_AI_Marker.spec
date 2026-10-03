@@ -23,6 +23,8 @@ a = Analysis(
         'license_core',
         'license_dialog',
         'inspector',
+        'chat_window',
+        'rag_engine',
         'PySide6.QtPdf',
         'md_postprocess',
         'marker_bridge',

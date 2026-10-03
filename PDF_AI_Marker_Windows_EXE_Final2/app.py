@@ -66,6 +66,7 @@ class App(QMainWindow):
         self.result_dir = None
         self.history = []  # (thư mục kết quả, file gốc, mật khẩu) để mở Đối chiếu trực quan
         self.inspector = None
+        self.chat_win = None
         self.setStyleSheet("""
             QMainWindow, QWidget { background: #f3f6fb; color: #19324e; font: 10pt 'Segoe UI'; }
             QPushButton { background: white; border: 1px solid #d7e0ec; border-radius: 7px; padding: 9px 15px; }
@@ -164,6 +165,14 @@ class App(QMainWindow):
         )
         self.inspect_button.clicked.connect(self.open_inspector)
         row.addWidget(self.inspect_button)
+        self.chat_button = QPushButton('🤖 Trợ lý AI (RAG)')
+        self.chat_button.setToolTip('Hỏi đáp thông minh 100% offline với hồ sơ thiết kế, bản vẽ và dự toán vừa chuyển đổi')
+        self.chat_button.setStyleSheet(
+            "QPushButton { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; font-weight: 600; } "
+            "QPushButton:hover { background: #dbeafe; }"
+        )
+        self.chat_button.clicked.connect(self.open_chat)
+        row.addWidget(self.chat_button)
         layout.addLayout(row)
         self.progress = QProgressBar()
         self.progress.setTextVisible(False)
@@ -336,6 +345,31 @@ class App(QMainWindow):
             return
         self.inspector.choose_result()
 
+    def open_chat(self):
+        try:
+            from chat_window import ChatWindow
+        except Exception as exc:
+            QMessageBox.warning(self, 'Trợ lý AI', f'Không khởi động được Trợ lý AI:\n{type(exc).__name__}: {exc}')
+            return
+        if self.chat_win is None:
+            self.chat_win = ChatWindow(self, inspector_window=self.inspector)
+        else:
+            self.chat_win.inspector_window = self.inspector
+
+        if self.history:
+            folder, source, password = self.history[-1]
+            if self.chat_win.current_folder != folder:
+                self.chat_win.load_project(str(folder))
+        elif self.chat_win.current_folder is None:
+            if self.result_dir and Path(self.result_dir).exists():
+                self.chat_win.load_project(str(self.result_dir))
+            else:
+                self.chat_win.choose_folder()
+
+        self.chat_win.show()
+        self.chat_win.raise_()
+        self.chat_win.activateWindow()
+
     def show_license_info(self):
         ok, machine_id = verify_license()
         dlg = LicenseDialog(machine_id, self)
@@ -427,7 +461,7 @@ class App(QMainWindow):
                     self.password.clear()
                     label = 'Đã dừng' if event[4] else 'Hoàn tất'
                     self.status.setText(f'{label} • {event[1]} file đã xuất • {len(event[2])} lỗi • {len(event[3])} file cần kiểm tra'
-                                        + (' • Bấm 🔍 Đối chiếu trực quan để soát bảng trên bản vẽ gốc' if event[1] else ''))
+                                        + (' • Bấm 🔍 Đối chiếu hoặc 🤖 Trợ lý AI để tra cứu' if event[1] else ''))
                     if event[2] or event[3]:
                         QMessageBox.warning(self, 'Kết quả chuyển đổi', '\n'.join(event[2]+event[3])[:5000])
         except queue.Empty:
@@ -451,16 +485,33 @@ if __name__ == '__main__':
             inspect_dir = sys.argv[i + 1]
             window.history.append((Path(inspect_dir), None, ''))
             window.open_inspector()
+
+    # --chat "<thư mục>_Marker" : mở thẳng cửa sổ Trợ lý AI (RAG Chat)
+    chat_dir = None
+    if '--chat' in sys.argv:
+        i = sys.argv.index('--chat')
+        if i + 1 < len(sys.argv):
+            chat_dir = sys.argv[i + 1]
+            window.history.append((Path(chat_dir), None, ''))
+            window.open_chat()
+
     if '--self-test' in sys.argv:
         import time
         t0 = time.time()
-        while time.time() - t0 < (1.5 if inspect_dir else 0.1):
+        while time.time() - t0 < (1.5 if (inspect_dir or chat_dir) else 0.1):
             app.processEvents()
             time.sleep(0.02)
-        target = window.inspector if (inspect_dir and window.inspector) else window
+        if chat_dir and window.chat_win:
+            target = window.chat_win
+        elif inspect_dir and window.inspector:
+            target = window.inspector
+        else:
+            target = window
         target.grab().save(sys.argv[-1])
         if window.inspector:
             window.inspector.close()
+        if window.chat_win:
+            window.chat_win.close()
         window.close()
     else:
         sys.exit(app.exec())
