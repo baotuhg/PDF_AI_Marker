@@ -36,12 +36,81 @@ def _key(text: str) -> str:
     return re.sub(r"[^0-9a-z]", "", strip_accents(text).lower())
 
 
-def _digits(text: str) -> str:
-    """Chuỗi chữ số để so khớp. Bỏ các số 0/1/6 đứng lẻ dính chữ cái vì đó
-    thường là chữ có dấu bị RapidOCR đọc nhầm ('s6'=số, 'M6'=mố, '1op'=lớp)."""
-    compact = re.sub(r"\s+", "", strip_accents(text))
-    cleaned = re.sub(r"(?<=[A-Za-z])[016](?!\d)|(?<!\d)[016](?=[A-Za-z])", "", compact)
-    return "".join(re.findall(r"\d", cleaned))
+def _clean_ocr_digits(text: str) -> str:
+    """
+    Chuỗi chữ số chuẩn hóa để so khớp 2 bộ OCR (RapidOCR vs Surya).
+    Khử triệt để các báo động giả do RapidOCR đọc nhầm dấu tiếng Việt thành số
+    (s6=số, ng6=ngõ, ph6=phố, B0=bộ, 1op=lớp, 16=lỗ, c6=có, h8=hồ, m6=mố, d0=độ),
+    đọc nhầm ký hiệu đường kính (032=Ø32), số La Mã (I-1=I-I), gạch chéo (217=2/7),
+    chữ O trong số (3OMPA=30MPA, O2=02), số mũ (Km²=Km2), và ký hiệu LaTeX của Surya.
+    """
+    if not text:
+        return ""
+    # 1. Khử cú pháp LaTeX nếu Surya sinh ra (vd: H_{4\%}, \text{ mm}, \times)
+    t = re.sub(r"\\[a-zA-Z]+", " ", text)
+    t = re.sub(r"[{}_$]", " ", t)
+
+    # 2. Chuẩn hóa Unicode NFKD (Km² -> Km2, ³ -> 3, etc.)
+    t = unicodedata.normalize("NFKD", t)
+
+    # 3. Chuẩn hóa chữ O/o giữa hoặc liền kề số thành 0 (vd: 3OMPA -> 30MPA, O2KHE -> 02KHE)
+    t = re.sub(r"(?<=\d)[oO]|[oO](?=\d)", "0", t)
+
+    # 4. Bỏ dấu tiếng Việt về chữ không dấu cơ bản (giữ nguyên khoảng trắng giữa các từ)
+    out = []
+    for ch in t:
+        if ch in "đĐðÐ":
+            out.append("d" if ch in "đð" else "D")
+        else:
+            base = "".join(c for c in unicodedata.normalize("NFD", ch) if not unicodedata.combining(c))
+            out.append(base[:1] if base else ch)
+    t = "".join(out)
+
+    # 5. Khử các từ nhầm dấu kinh điển của RapidOCR
+    t = re.sub(r"\b[sS]6\b", "so", t)
+    t = re.sub(r"\b[nN]g6\b", "ngo", t)
+    t = re.sub(r"\b[pP]h6\b", "pho", t)
+    t = re.sub(r"\b[bB]0\b", "bo", t)
+    t = re.sub(r"\b[mM]6\b", "mo", t)
+    t = re.sub(r"\b[dD][06]\b", "do", t)
+    t = re.sub(r"\b[cC]6\b", "co", t)
+    t = re.sub(r"\b[hH]8\b", "ho", t)
+    t = re.sub(r"\b[tT]6\b", "to", t)
+    t = re.sub(r"\b[lL]6\b", "lo", t)
+    t = re.sub(r"\b16\s*(khoan|lo)\b", r"lo \1", t, flags=re.IGNORECASE)
+    t = re.sub(r"\b(so|co so)\s+16\b", r"\1 lo", t, flags=re.IGNORECASE)
+    t = re.sub(r"\b1[oO]p\b", "lop", t, flags=re.IGNORECASE)
+    t = re.sub(r"\b[tT]y\s*11\b", "tyle", t, flags=re.IGNORECASE)
+    t = re.sub(r"\b2\s*lu[pP]o?i?\s*thep\b", "2 luoi thep", t, flags=re.IGNORECASE)
+    t = re.sub(r"dan\s*0\s*100", "dan o 100", t, flags=re.IGNORECASE)
+
+    # 6. Khử số 0, 6, 8 dính liền chữ cái (không phải số thực)
+    t = re.sub(r"(?<=[A-Za-z])[068](?![0-9])", "", t)
+    t = re.sub(r"(?<![0-9])[068](?=[A-Za-z])", "", t)
+    # Khử số 1 dính giữa 2 chữ cái hoặc ở đầu từ chữ cái (1op -> op)
+    t = re.sub(r"(?<=[A-Za-z])1(?=[A-Za-z])", "", t)
+    t = re.sub(r"\b1(?=[a-zA-Z]{2,})", "", t)
+
+    # 7. Khử số 0 đứng trước đường kính cốt thép do đọc nhầm Ø (CHOT 032 -> CHOT 32, 032 -> 32)
+    t = re.sub(r"(?<=CHOT\s)0(?=(1[02468]|2[0258]|32)\b)", "", t, flags=re.IGNORECASE)
+    t = re.sub(r"(?<=CHOT)0(?=(1[02468]|2[0258]|32)\b)", "", t, flags=re.IGNORECASE)
+    t = re.sub(r"(?<=THEP\s)0(?=(1[02468]|2[0258]|32)\b)", "", t, flags=re.IGNORECASE)
+    t = re.sub(r"(?<=THEP)0(?=(1[02468]|2[0258]|32)\b)", "", t, flags=re.IGNORECASE)
+    t = re.sub(r"\b0(?=(1[02468]|2[0258]|32)\b)", "", t)
+
+    # 8. Chuẩn hóa số La Mã I - 1 -> I - I
+    t = re.sub(r"I\s*-\s*1\b", "I-I", t)
+    # Chuẩn hóa phân số (217) -> (2/7)
+    t = re.sub(r"\((\d)1(\d)\)", r"(\1/\2)", t)
+    # Chuẩn hóa đầu dòng số thứ tự 1.KICHTHUOC -> KICHTHUOC
+    t = re.sub(r"^\s*1\.\s*(?=[A-Za-z])", "", t)
+    # Chuẩn hóa l=1m vs 1=1m
+    t = re.sub(r"\b1=(?=\d)", "l=", t)
+
+    return "".join(re.findall(r"\d", t))
+
+
+_digits = _clean_ocr_digits
 
 
 TITLE_BLOCK_ADMIN_KEYWORDS = [
@@ -75,7 +144,8 @@ def is_title_block_or_margin_box(box, text: str, W: int, H: int) -> bool:
 
 def needs_refine(text: str) -> bool:
     """Chỉ gửi ô chữ có khả năng là tiếng Việt cần phục hồi dấu.
-    Bỏ qua mã hiệu kỹ thuật và số đo như D14, KC-01, 1500x200, STT..."""
+    Bỏ qua mã hiệu kỹ thuật và số đo như D14, KC-01, 1500x200, STT...
+    Đồng thời bỏ qua con dấu thẩm định hành chính để tránh xung đột không cần thiết."""
     words = re.findall(r"[A-Za-zÀ-ỹ]{2,}", text)
     if not words:
         return False
@@ -83,7 +153,13 @@ def needs_refine(text: str) -> bool:
                   "D10", "D12", "D14", "D16", "D18", "D20", "D22", "D25", "D28", "D32",
                   "CB300", "CB400", "CIII", "CII"}
     meaningful = [w for w in words if w.upper() not in skip_codes and re.search(r"[aeiouyAEIOUYà-ỹĂ-Ỹ]", w)]
-    return len(meaningful) > 0
+    if not meaningful:
+        return False
+    # Bỏ qua chữ hành chính con dấu thẩm định lặp lại trên bản vẽ
+    k = re.sub(r"[^A-Z]", "", strip_accents(text).upper())
+    if any(kw in k for kw in ["SGTVT", "QLCLCT", "THEOVANBAN", "SOGIAOTHONG"]):
+        return False
+    return True
 
 
 def _html_to_text(html: str) -> str:
@@ -96,16 +172,29 @@ def judge(rapid: str, surya: str):
     """Trả về (text_dùng, điểm_phạt, lý_do) theo quy tắc kiểm tra chéo."""
     if not surya or not _ALLOWED.match(surya):
         return rapid, None, "surya_rejected_script"
-    rk, sk = _key(rapid), _key(surya)
+
+    # Tẩy ký tự CJK rác nếu có
+    surya_clean = re.sub(r"[\u4e00-\u9fff]+", "", surya).strip()
+    rapid_clean = re.sub(r"[\u4e00-\u9fff]+", "", rapid).strip()
+    if not surya_clean:
+        return rapid, None, "surya_rejected_empty"
+
+    rk, sk = _key(rapid_clean), _key(surya_clean)
     ratio = difflib.SequenceMatcher(None, rk, sk).ratio()
     if ratio < 0.40:
         return rapid, None, "surya_rejected_mismatch"
     # VLM đôi khi thêm chữ không có trên bản vẽ ('Trọng lượng giá trị (kg/m)')
     if len(sk) > 1.40 * len(rk) and len(sk) - len(rk) > 3:
         return rapid, None, "surya_rejected_added_text"
-    if _digits(rapid) != _digits(surya):
-        return f"{surya} {ALT_OPEN}{rapid}{ALT_CLOSE}", 0.5, "digits_differ"
-    return surya, None, "ok"
+
+    dr = _clean_ocr_digits(rapid_clean)
+    ds = _clean_ocr_digits(surya_clean)
+    if dr != ds:
+        # Nếu chỉ khác ở dấu hành chính lặp lại -> chấp nhận Surya, không ghi xung đột
+        if any(k in rapid_clean.upper() or k in surya_clean.upper() for k in ["SGTVT", "QLCLCT", "THEO VAN BAN", "SOGIAOTHONG"]):
+            return surya_clean, None, "stamp_ignored"
+        return f"{surya_clean} {ALT_OPEN}{rapid_clean}{ALT_CLOSE}", 0.5, "digits_differ"
+    return surya_clean, None, "ok"
 
 
 class SuryaRefiner:

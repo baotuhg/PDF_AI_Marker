@@ -156,10 +156,35 @@ def make_rapid_engine():
     return RapidOCR(use_cls=True), "CPU"
 
 
+def enhance_contrast_clahe(pil_img):
+    """
+    Tăng cường tương phản cục bộ bằng CLAHE (OpenCV) cho ảnh bản vẽ CAD scan.
+    Làm nổi rõ nét chữ mảnh, chữ mờ mà KHÔNG làm đứt nét hoặc mất dấu chấm thập phân.
+    """
+    try:
+        import cv2
+        import numpy as np
+        img_np = np.array(pil_img)
+        if len(img_np.shape) == 3:
+            lab = cv2.cvtColor(img_np, cv2.COLOR_RGB2LAB)
+            l, a, b = cv2.split(lab)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            cl = clahe.apply(l)
+            enhanced = cv2.cvtColor(cv2.merge((cl, a, b)), cv2.COLOR_LAB2RGB)
+        else:
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            enhanced = clahe.apply(img_np)
+        from PIL import Image
+        return Image.fromarray(enhanced)
+    except Exception:
+        return pil_img
+
+
 def ocr_pil(engine, pil_img, factor: float, refiner=None) -> List[List[Any]]:
     """OCR một ảnh trang đã render (có thể đã xoay); trả tọa độ nhân `factor`
     (pixel ảnh -> hệ tọa độ cơ sở)."""
-    results = ocr_image_tiled(engine, pil_img)
+    enhanced = enhance_contrast_clahe(pil_img)
+    results = ocr_image_tiled(engine, enhanced)
     before = [e[1] for e in results]
     if refiner is not None and results:
         refiner.refine(pil_img, results)
@@ -177,7 +202,8 @@ def ocr_pdf_page(engine, page, refiner=None, with_image: bool = False):
     pw, ph = page.get_size()
     render_scale = RENDER_DPI / 72.0
     pil_img = page.render(scale=render_scale).to_pil()
-    results = ocr_image_tiled(engine, pil_img)
+    enhanced = enhance_contrast_clahe(pil_img)
+    results = ocr_image_tiled(engine, enhanced)
     before = [e[1] for e in results]
     if refiner is not None and results:
         refiner.refine(pil_img, results)

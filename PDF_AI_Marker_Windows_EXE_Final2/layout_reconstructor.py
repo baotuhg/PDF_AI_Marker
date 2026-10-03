@@ -215,6 +215,14 @@ def fix_vietnamese_typos(text: str) -> str:
     result = text
     for pattern, replacement in _compiled_rules:
         result = pattern.sub(lambda m, r=replacement: _match_case(m.group(0), m.expand(r)), result)
+
+    # Khôi phục dấu tiếng Việt chuyên sâu từ chữ Latin bằng vn_diacritics
+    try:
+        from vn_diacritics import restore_vietnamese_diacritics
+        result = restore_vietnamese_diacritics(result)
+    except Exception:
+        pass
+
     # Thêm khoảng trắng sau dấu hai chấm nếu dính chữ cái ('Trong do:Bérong').
     # Không áp dụng cho số để giữ tỷ lệ 1:500, giờ 14:30, TCVN 11823:2017.
     return re.sub(r':([A-Za-zÀ-ỹ])', r': \1', result)
@@ -973,6 +981,78 @@ def _grid_title(grid, items, excluded, med_h) -> Tuple[str, List[Dict[str, Any]]
     return " ".join(" ".join(it["text"] for it in l["items"]) for l in lines).strip(), used
 
 
+def is_suspicious_for_review(it: Dict[str, Any], stamp_ids: set, tb_ids: set) -> bool:
+    """
+    Bộ lọc khử báo động giả thông minh cho can_kiem_tra.md:
+    Chỉ giữ lại các nghi vấn thực sự:
+    1. Xung đột số liệu 2 bộ OCR (ALT_OPEN) không phải con dấu hành chính lặp lại.
+    2. Chữ/số bị garbled hoặc điểm tin cậy rất thấp (< 0.55).
+    Loại bỏ:
+    - Con dấu hành chính và khung tên đã nhận diện.
+    - Ký tự rác CJK, hạt bụi dấu câu (? ★ △ ° .).
+    - Kích thước hình học thuần túy (800, 1000, 300, 810) có score >= 0.50.
+    - Ký hiệu trục bản vẽ / số hiệu thanh đơn lẻ (A, B, C, 0, 1, 2) có score >= 0.50.
+    - Ký hiệu đường kính / cốt thép (D10, D19, Phi14, Phi20) có score >= 0.55.
+    - Tên mặt cắt, tỷ lệ bản vẽ kỹ thuật (TỶ LỆ 1/50, MẶT CẮT I-I).
+    """
+    txt = it["text"].strip()
+    score = it.get("score", 1.0)
+    it_id = id(it)
+
+    # 1. Bỏ qua nếu thuộc vùng con dấu hoặc khung tên đã nhận diện
+    if it_id in stamp_ids or it_id in tb_ids:
+        return False
+
+    # 2. Xung đột 2 bộ OCR
+    if ALT_OPEN in txt:
+        # Bỏ qua nếu là con dấu hành chính lặp lại
+        if any(k in txt.upper() for k in ["SGTVT", "QLCLCT", "THEO VAN BAN", "THEO VĂN BẢN", "GIAO THONG", "GIAO THÔNG", "NAM 202", "NĂM 202"]):
+            return False
+        return True
+
+    # Nếu score >= LOW_CONFIDENCE (0.75) thì đạt chuẩn tin cậy
+    if score >= LOW_CONFIDENCE:
+        return False
+
+    # 3. Ký tự CJK chữ Hán
+    if re.search(r"[\u4e00-\u9fff]", txt):
+        return False
+
+    # 4. Loại bỏ hạt bụi dấu câu, ký hiệu đơn lẻ
+    if txt in list("?★△.°)~-+/*=,;:[]{}'\"") or re.fullmatch(r"[\W_]+", txt):
+        return False
+
+    # 5. Chữ hành chính dấu thẩm định
+    if any(k in txt.upper() for k in ["SGTVT", "QLCLCT", "THEO VAN BAN", "THEO VĂN BẢN", "GIAO THONG", "GIAO THÔNG"]):
+        return False
+
+    # 6. Kích thước hình học thuần túy (vd: 800, 810, 1000, 15., 7.) với score >= 0.50
+    if re.fullmatch(r"^\d{1,6}([.,]\d*)?$", txt) and score >= 0.50:
+        return False
+
+    # 7. Ký hiệu trục tròn / số hiệu thanh đơn lẻ (A, B, C, 0, 1, 2, 8) với score >= 0.50
+    if len(txt) == 1 and score >= 0.50:
+        return False
+
+    # 8. Mã hiệu ngắn 2-4 ký tự (BI, B1, VII, 10b, pp) với score >= 0.50
+    if re.fullmatch(r"^[A-Za-z0-9_]{2,4}$", txt) and score >= 0.50:
+        return False
+
+    # 9. Ký hiệu cốt thép (D10, D19, Phi14, Phi20, D10(F), D10G1) với score >= 0.55
+    if re.fullmatch(r"^(D|Φ|φ)\d{1,2}[A-Za-z0-9_() -]*$", txt) and score >= 0.55:
+        return False
+
+    # 10. Tên mặt cắt / Tỷ lệ bản vẽ
+    if any(kw in txt.upper() for kw in ["TY LE", "TỶ LỆ", "MAT CAT", "MẶT CẮT", "CẮT"]):
+        return False
+
+    # 11. Ký hiệu kỹ thuật và đơn vị thường gặp
+    if txt in ["(ww)", "(wu)", "(s/eu)", "om", "bi", "da", "dao", "rn", "rL", "AC"]:
+        return False
+
+    return True
+
+
 def analyze_page(ocr_res: List[Any], image=None, factor: float = 1.0, dpi: float = 200.0) -> Dict[str, Any]:
     """
     Phân tích một trang từ danh sách hộp chữ [[box, text, score], ...].
@@ -987,6 +1067,9 @@ def analyze_page(ocr_res: List[Any], image=None, factor: float = 1.0, dpi: float
         if not entry or len(entry) < 2:
             continue
         text = str(entry[1]).strip()
+        # Khử chữ Hán rác (CJK) do RapidOCR sinh ra từ vết lem mực, mộc dấu hoặc nét vẽ CAD
+        if re.search(r"[\u4e00-\u9fff]", text):
+            text = re.sub(r"[\u4e00-\u9fff]+", "", text).strip()
         if not text:
             continue
         score = float(entry[2]) if len(entry) > 2 else 1.0
@@ -1061,8 +1144,10 @@ def analyze_page(ocr_res: List[Any], image=None, factor: float = 1.0, dpi: float
                                             min_x, min_y, page_w, page_h)
 
     low = []
+    stamp_ids = set(id(it) for it in stamp_items)
+    tb_ids = set(id(it) for it in tb_items)
     for it in items:
-        if it["score"] < LOW_CONFIDENCE or ALT_OPEN in it["text"]:
+        if is_suspicious_for_review(it, stamp_ids, tb_ids):
             low.append({"text": it["text"], "score": round(it["score"], 3),
                         "bbox": [round(it["x_min"], 1), round(it["y_min"], 1),
                                  round(it["x_max"], 1), round(it["y_max"], 1)]})

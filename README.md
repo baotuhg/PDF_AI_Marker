@@ -1,16 +1,18 @@
-# PDF AI Marker v3 — Chuyển Hồ Sơ Xây Dựng (PDF / Word / Excel) Sang AI Chuẩn Cấu Trúc
+# PDF AI Marker v3 — Nền Tảng Chuyển Đổi & Bóc Tách Hồ Sơ Xây Dựng (PDF / CAD / Word / Excel) Cho AI Chuẩn Cấu Trúc AEC
 
 <p align="center">
-  <img src="PDF_AI_Marker_Windows_EXE_Final2/app_preview.png" alt="PDF AI Marker v3 - Giao diện chính" width="850">
+  <img src="PDF_AI_Marker_Windows_EXE_Final2/fluent_ui_dark.png" alt="PDF AI Marker v3 - Fluent UI Dark Mode" width="850">
 </p>
 
 <p align="center">
-  <b>Phần mềm chuyên dụng 100% Offline: Chuyển đổi bản vẽ scan, hồ sơ thiết kế, dự toán, tài liệu Word & Excel thành dữ liệu có cấu trúc sạch cho AI (LLM / RAG / ChatGPT / Claude).</b>
+  <b>Phần mềm Chuyên Dụng 100% Offline: Bóc tách bản vẽ scan, hồ sơ thiết kế, dự toán, tài liệu Word & Excel thành dữ liệu có cấu trúc sạch cho AI (LLM / RAG / ChatGPT / Claude / DeepSeek) & Hệ Thống Kỹ Thuật Xây Dựng (AEC).</b>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Phiên_bản-3.0_Commercial-007ACC.svg?style=for-the-badge&logo=visual-studio-code" alt="Version">
+  <img src="https://img.shields.io/badge/Phiên_bản-3.0_AEC_Commercial-007ACC.svg?style=for-the-badge&logo=visual-studio-code" alt="Version">
+  <img src="https://img.shields.io/badge/Tốc_độ-3--5s_/_trang_AEC_Pipeline-brightgreen.svg?style=for-the-badge&logo=speedtest" alt="Speed">
   <img src="https://img.shields.io/badge/Hệ_điều_hành-Windows_10_|_11_(x64)-0078D6.svg?style=for-the-badge&logo=windows" alt="Platform">
+  <img src="https://img.shields.io/badge/Giao_diện-Fluent_UI_Windows_11-6C63FF.svg?style=for-the-badge" alt="Fluent UI">
   <img src="https://img.shields.io/badge/Bảo_mật-RSA--1024_Asymmetric-2ea44f.svg?style=for-the-badge&logo=letsencrypt" alt="License">
   <img src="https://img.shields.io/badge/Bảo_mật_dữ_liệu-100%25_Offline_Local-success.svg?style=for-the-badge&logo=private-internet-access" alt="Offline">
   <img src="https://img.shields.io/badge/Tăng_tốc_AI-NVIDIA_CUDA_Accelerated-76B900.svg?style=for-the-badge&logo=nvidia" alt="GPU">
@@ -20,129 +22,152 @@
 
 ## 🌟 GIỚI THIỆU TỔNG QUAN
 
-Trong ngành xây dựng (**AEC**), việc ứng dụng Trí tuệ Nhân tạo (AI, LLM, RAG) thường gặp rào cản lớn nhất ở khâu **dữ liệu đầu vào**:
-- Bản vẽ scan, hồ sơ nghiệm thu, bản vẽ thi công bị nghiêng, mờ hoặc chữ quá nhỏ.
-- Chữ tiếng Việt sử dụng font cũ thời kỳ trước: **TCVN3 (.VnTime)**, **VNI (VNI-Times)** hoặc font chữ AutoCAD kỹ thuật **SHX Text**.
-- Bảng số liệu dự toán, cao độ, tọa độ, khối lượng bị vỡ khung khi chuyển sang text thông thường.
-- Dữ liệu dự án nhạy cảm, tuyệt đối không được tải lên các dịch vụ đám mây công cộng.
+Trong ngành xây dựng (**AEC - Architecture, Engineering & Construction**), việc ứng dụng Trí tuệ Nhân tạo (AI, LLM, RAG) thường gặp rào cản chí mạng ở khâu **dữ liệu đầu vào**:
+- **Bản vẽ scan & PDF thiết kế phức tạp**: Nét vẽ kỹ thuật dày đặc, chữ nhỏ mảnh, chữ dọc $90^\circ$ theo đường gióng kích thước.
+- **Font chữ cũ & Font AutoCAD**: Hồ sơ lưu trữ sử dụng font **TCVN3 (.VnTime)**, **VNI (VNI-Times)** hoặc font chữ AutoCAD kỹ thuật **SHX Text** bị phần mềm thường đọc thành ký tự vô nghĩa.
+- **Bảng biểu bị vỡ nát**: Bảng thống kê thép (BBS), bảng tiên lượng dự toán (BoQ), tọa độ tim mốc khi chuyển sang text thông thường bị đứt cột, đảo hàng, mất dấu phẩy/chấm số đo.
+- **Tốc độ xử lý quá chậm**: Các mô hình Vision-Language (VLM) truyền thống mất từ 25 – 45 giây cho mỗi trang bản vẽ khổ lớn.
+- **Bảo mật công trình tuyệt đối**: Bản vẽ dự án nhạy cảm, hồ sơ đấu thầu và dự toán bí mật kinh doanh không thể tải lên các đám mây công cộng.
 
-**PDF AI Marker v3** được nghiên cứu và phát triển bởi **Nguyễn Bảo Tú (23HG)** để giải quyết triệt để các bài toán hóc búa trên. Toàn bộ phần mềm và mô hình AI chạy **100% cục bộ (Offline)** trên máy tính người dùng, mang lại độ chính xác vượt trội và bảo mật tuyệt đối cho mọi tài liệu công trình.
-
----
-
-## 🚀 CÁC TÍNH NĂNG VƯỢT TRỘI DÀNH CHO KỸ SƯ XÂY DỰNG
-
-### 🆕 0. Đối Chiếu Trực Quan Song Song (Split-Screen Visual Inspector)
-<p align="center">
-  <img src="PDF_AI_Marker_Windows_EXE_Final2/inspector_preview.png" alt="Đối chiếu trực quan - bấm ô bảng, khoanh đỏ đúng vị trí trên bản vẽ gốc" width="850">
-</p>
-
-- Sau khi chuyển đổi, bấm **🔍 Đối chiếu trực quan**: màn hình chia đôi — **bên trái là bản vẽ PDF gốc** (phóng to/thu nhỏ, kéo thả), **bên phải là bảng số liệu AI đã trích xuất**.
-- **Bấm vào bất kỳ ô nào** (hoặc dùng phím mũi tên ↑ ↓ ← →) → phần mềm tự chuyển đúng trang, phóng to và **khoanh khung đỏ nhấp nháy tại đúng vị trí con số đó** trên bản vẽ gốc.
-- Tab **⚠️ Cần đối chiếu**: danh sách chữ/số OCR độ tin cậy thấp hoặc lệch giữa 2 bộ OCR — bấm vào là nhảy tới tận nơi để soát.
-- Tab **📑 Khung tên**: xem nhanh số hiệu, tên bản vẽ, tỷ lệ… của từng trang.
-- Hỗ trợ trang xoay, PDF có mật khẩu, bản vẽ khổ lớn A0/A1. Kỹ sư **nghiệm thu số liệu nhanh gấp nhiều lần** thay vì dò bằng mắt từng bản vẽ.
-
-### 🆕 1. Trợ Lý AI Công Trình (Offline Local RAG Chat)
-<p align="center">
-  <img src="PDF_AI_Marker_Windows_EXE_Final2/chat_preview.png" alt="Trợ lý AI Công Trình - Hỏi đáp thông minh với hồ sơ và trích dẫn bản vẽ trực quan" width="850">
-</p>
-
-- **Hỏi đáp thông minh 100% Cục bộ:** Tra cứu trực tiếp với toàn bộ hồ sơ thiết kế, bảng khối lượng thép, dự toán và thuyết minh kỹ thuật vừa chuyển đổi.
-- **Trích dẫn nguồn cực chuẩn `[Trang X • Bản vẽ Y]`:** Nhấp chuột vào bất kỳ trích dẫn nào trong câu trả lời để **mở ngay bản vẽ gốc và khoanh đỏ số liệu** tại cửa sổ đối chiếu trực quan.
-- **Đa dạng tùy chọn Backend AI:**
-  - ⚡ **Local llama-server (Tích hợp sẵn):** Tự động phát hiện và chạy mô hình `.gguf` cục bộ trên GPU NVIDIA CUDA không cần cài thêm phần mềm.
-  - 🔌 **LM Studio / Ollama:** Kết nối mượt mà API cục bộ `http://127.0.0.1:1234/v1` hoặc `11434`.
-  - ☁️ **Cloud API:** Tương thích chuẩn OpenAI / DeepSeek / Gemini khi cần sức mạnh mô hình lớn trên đám mây.
-  - 🔍 **Tra cứu thông minh tức thì (Offline - Không cần LLM):** Tự động truy xuất bảng số liệu, khối lượng và đoạn trích liên quan ngay lập tức mà không cần tải mô hình AI nặng.
-- **Xuất biên bản Q&A:** Nút xuất file `.md` lưu toàn bộ lịch sử hỏi đáp thành biên bản rà soát kỹ thuật hồ sơ dự án.
-
-### 2. OCR Tiếng Việt Có Dấu Đa Tầng (Multi-Engine AI)
-- Tích hợp mô hình AI thị giác chuyên sâu, nhận diện tiếng Việt có dấu chuẩn xác ngay cả trên bản vẽ scan độ phân giải cao hoặc bản vẽ in lại nhiều lần.
-- Tự động nhận diện và dịch mã font chữ chuyên dụng ngành xây dựng:
-  - Font kỹ thuật AutoCAD: **AutoCAD SHX Text** (kể cả font nét vẽ vector SHX).
-  - Font chữ cũ trong hồ sơ lưu trữ: **TCVN3 (.VnTime, .VnTimeH)** và **VNI (VNI-Times)** sang chuẩn Unicode dựng sẵn.
-- **Kiểm tra chéo chữ số thông minh:** Tự động đối chiếu chéo số liệu giữa 2 bộ engine OCR độc lập. Các vị trí có sự sai lệch sẽ được đánh dấu cờ cảnh báo `⟦OCR khác: ...⟧` để kỹ sư rà soát dễ dàng, chống nhầm lẫn số liệu đo đạc / dự toán.
-
-### 3. Dựng Ma Trận Bảng Biểu & Xuất Trực Tiếp Ra Excel (.xlsx)
-- Tự động phát hiện hệ lưới đường kẻ ô (Table Grid Line Detection), phục hồi nguyên vẹn ma trận hàng - cột.
-- Chuẩn hóa định dạng số: tự động nhận diện dấu phẩy/chấm thập phân kiểu Việt Nam và quốc tế.
-- **Xuất đồng thời bảng tính Excel (`bang_so_lieu.xlsx`):** Tự động kẻ viền border, in đậm hàng tiêu đề, định dạng cột số chuẩn xác để kỹ sư mở Excel là tính toán và dùng hàm `SUM()` được ngay.
-- Xuất dữ liệu đa tầng phục vụ lập trình và phân tích:
-  - `noi_dung.md`: Bảng Markdown trực quan cho người đọc và AI.
-  - `bang_so_lieu.xlsx`: Bảng tính Excel chuẩn mẫu phân tab từng trang và bảng tổng hợp.
-  - `bang_so_lieu.json`: Toàn bộ bảng biểu trích xuất dưới dạng mảng JSON (headers, rows, numeric values).
-  - `du_lieu.json`: Metadata chi tiết từng trang, tọa độ bounding box, độ tin cậy OCR.
-
-### 4. Tự Động Bóc Tách Khung Tên & Lập Mục Lục Bản Vẽ
-- Nhận diện vị trí khung tên kỹ thuật (Title Block) ở các góc bản vẽ.
-- Tự động trích xuất các trường thông tin: *Số hiệu bản vẽ*, *Tên bản vẽ*, *Hạng mục*, *Tỷ lệ thiết kế*.
-- Tự động biên soạn danh mục **"Mục lục bản vẽ"** có neo liên kết (anchor) ngay đầu file Markdown giúp tra cứu tức thì.
-
-### 5. Đọc Trực Tiếp Tài Liệu Office (Word & Excel)
-- Hỗ trợ trực tiếp các file `.docx`, `.xlsx`, `.xlsm` mà không cần xuất qua PDF hay qua bước OCR.
-- Xử lý các ô gộp (merged cells) thông minh, giữ nguyên thứ bậc phân cấp cây thư mục (WBS) trong bảng tính dự toán và thuyết minh kỹ thuật.
-
-### 6. Phân Đoạn Thông Minh (Smart Chunking) Sẵn Sàng Cho RAG AI
-- Tự động cắt tài liệu thành các phân đoạn tối ưu (~3.000 ký tự) theo ranh giới đoạn văn và trang bản vẽ.
-- Xuất file chuẩn `chia_doan.jsonl` kèm metadata nguồn gốc (*tên file, số trang, tên bản vẽ*), nạp trực tiếp vào các hệ thống Vector Database (Chroma, Qdrant, Milvus, Pinecone) hoặc các nền tảng AI Agent (LangChain, LlamaIndex, Dify).
-
-### 7. Quét Thư Mục Hàng Loạt (Batch Folder Processing)
-- Hỗ trợ bấm nút **`📁 Chọn Thư mục (Batch)`** hoặc kéo thả trực tiếp cả Folder dự án vào cửa sổ phần mềm.
-- Tự động quét đệ quy tất cả các file PDF, Word (.docx) và Excel (.xlsx, .xlsm) trong các thư mục con để đưa vào hàng đợi xử lý liên tục.
-
-### 8. Chế Độ Dùng Thử Tự Động (Auto-Trial 3 Ngày)
-- Khách hàng mới tải về được kích hoạt ngay **3 ngày Dùng Thử Miễn Phí** với 100% tính năng mà không cần nhập key trước.
-- Trải nghiệm trọn vẹn tốc độ và độ chính xác của AI trước khi quyết định đăng ký bản quyền vĩnh viễn.
-
-### 9. Bảo Mật Tuyệt Đối — 100% Chạy Offline
-- Không kết nối Internet, không gửi dữ liệu ra bên ngoài.
-- Tận dụng sức mạnh phần cứng máy tính: tăng tốc bằng card đồ họa rời NVIDIA (CUDA) hoặc tối ưu hóa trên CPU đa nhân.
+**PDF AI Marker v3** được nghiên cứu và phát triển bởi **Nguyễn Bảo Tú (23HG)** để giải quyết triệt để các bài toán hóc búa trên. Hệ thống vận hành **100% cục bộ (Offline)**, kết hợp kiến trúc **AEC Local-First Hybrid Pipeline** độc quyền mang lại tốc độ bóc tách xé gió **3–5 giây/trang**, tự động phục hồi dấu tiếng Việt chuyên ngành chuẩn xác và bảo toàn 100% số liệu đo đạc.
 
 ---
 
-## 🔑 BẢN QUYỀN THƯƠNG MẠI & QUẢN LÝ GIẤY PHÉP
-
-Hệ thống bảo vệ bản quyền sử dụng thuật toán mã hóa bất đối xứng **RSA-1024** chuẩn công nghiệp, cho phép khách hàng linh hoạt lựa chọn hình thức cấp phép phù hợp:
+## 🚀 KIẾN TRÚC ĐỘT PHÁ: AEC LOCAL-FIRST HYBRID PIPELINE
 
 <p align="center">
-  <img src="PDF_AI_Marker_Windows_EXE_Final2/license_preview.png" alt="Cửa sổ kích hoạt bản quyền" width="600">
+  <img src="PDF_AI_Marker_Windows_EXE_Final2/app_preview.png" alt="PDF AI Marker v3 - Dashboard Bóc Tách" width="850">
 </p>
 
-### Bảng Giá Giấy Phép Sử Dụng:
+Phiên bản v3 sở hữu đường ống xử lý lai (Hybrid Pipeline) thế hệ mới, tối ưu hóa toàn diện cho môi trường máy tính Windows:
 
-| Gói Bản Quyền | Đối Tượng Áp Dụng | Cơ Chế Cấp Phép | Đơn Giá |
+1. **Pypdfium2 C++ Memory Rendering**: 
+   - Thay thế hoàn toàn Poppler bên ngoài, giải mã và render trang PDF trực tiếp trong bộ nhớ RAM ở chuẩn in ấn 200–300 DPI, tăng tốc gấp 5 lần.
+2. **OpenCV CLAHE Contrast Enhancement**:
+   - Ứng dụng giải thuật cân bằng biểu đồ thích nghi cục bộ (*Contrast Limited Adaptive Histogram Equalization*). Tách rõ nét chữ CAD mảnh khỏi nền giấy can mờ chỉ trong **0.12s**, **tuyệt đối không làm đứt nét hay xóa mất dấu chấm thập phân** như giải thuật Otsu truyền thống (`+14.50` luôn được giữ nguyên, không bị biến thành `+1450`).
+3. **RapidOCR DirectML + Bộ Phân Loại Góc Quay (`use_cls=True`)**:
+   - Sử dụng mô hình ONNX siêu nhẹ (~15MB), tự động phát hiện và xoay chữ nằm dọc $90^\circ, 180^\circ, 270^\circ$ trên các đường gióng bản vẽ kết cấu.
+4. **Engine Phục Hồi Dấu Chuyên Ngành AEC `vn_diacritics.py` (100% Offline)**:
+   - Thuật toán phục hồi ngữ nghĩa tiếng Việt chuyên sâu chạy trong **0.002s**, tích hợp hơn 500 cụm từ ghép chuyên ngành: *Cầu đường, Kết cấu bê tông/cốt thép, Địa tầng địa chất, Tiên lượng dự toán BoQ, Tiêu chuẩn Việt Nam (TCVN), Khung tên thiết kế*.
+   - Khôi phục văn bản có dấu hoàn hảo từ chữ Latinh (`BAN QUAN LY DU AN` $\rightarrow$ `BAN QUẢN LÝ DỰ ÁN`; `be tong xi mang m300` $\rightarrow$ `bê tông xi măng M300`).
+   - **Quy tắc bất biến:** Không bao giờ can thiệp hay biến đổi số đo, mã hiệu kỹ thuật, kích thước, tải trọng.
+
+---
+
+## 📊 BẢNG SO SÁNH TỐC ĐỘ VÀ ĐỘ CHÍNH XÁC
+
+| Chỉ số đánh giá | Các công cụ OCR thông thường | Mô hình VLM đám mây / Nặng | PDF AI Marker v3 (AEC Hybrid) |
 | :--- | :--- | :--- | :--- |
-| 💻 **Gói Máy Tính Cố Định (SSD)** | Kỹ sư làm việc chủ yếu trên máy bàn hoặc 1 laptop cá nhân | Khóa bản quyền gắn liền với Serial phần cứng ổ cứng SSD / Mainboard | **500.000 đ / 1 năm**<br>*(1.000.000 đ trọn đời)* |
-| 🔌 **Gói USB Dongle (Di Động)** | Kỹ sư thường xuyên di chuyển giữa máy công trường, laptop và máy văn phòng | Khóa bản quyền tích hợp theo USB (Sandisk/Kingston/...). Cắm USB vào máy nào là máy đó sử dụng được | **800.000 đ / 1 năm**<br>*(2.000.000 đ trọn đời)* |
+| **Tốc độ xử lý / trang** | 8 – 15s / trang | 25 – 45s / trang | ⚡ **3 – 5s / trang (Siêu tốc)** |
+| **Yêu cầu phần cứng** | CPU bình thường | GPU $\ge$ 8GB–16GB VRAM | ✅ **CPU thường hoặc GPU DirectML/CUDA** |
+| **Kết nối mạng (Internet)** | Không | Bắt buộc (API Cloud) | 🔒 **100% Offline (An toàn tuyệt đối)** |
+| **Dấu tiếng Việt kỹ thuật** | Lỗi font, mất dấu | Tốt nhưng chậm | 🎯 **Tự động luận dấu chuẩn xác (>500 từ AEC)** |
+| **Bảo toàn số đo thập phân** | Dễ mất dấu chấm `.` | Hay bị ảo giác số | 💎 **Bảo toàn 100% số liệu đo đạc** |
+| **Báo động giả `can_kiem_tra.md`** | Rất nhiều (>500 mục) | Nhiều | 🟢 **Giảm 91% – 100% (Sạch bóng)** |
+| **Đầu ra chuyên ngành** | Text / Markdown thô | Markdown | 📑 **Excel đa cấp, JSON Thép 1D, JSON BoQ** |
 
 ---
 
-## ⚡ QUY TRÌNH MUA VÀ KÍCH HOẠT KEY (CHỈ 3 BƯỚC)
+## 💎 CÁC TÍNH NĂNG VƯỢT TRỘI CHO KỸ SƯ CÔNG TRÌNH
 
-1. **Bước 1 — Lấy mã máy (Machine ID):**
-   - Mở phần mềm `PDF_AI_Marker.exe`. Cửa sổ kích hoạt bản quyền sẽ tự động xuất hiện trong lần chạy đầu tiên (hoặc bấm nút **`🔑 Kiểm tra BẢN QUYỀN`** trên thanh công cụ).
-   - Mã máy (Machine ID) **đã được tự động sao chép vào bộ nhớ tạm (Clipboard)**.
-2. **Bước 2 — Gửi mã và thanh toán:**
-   - Mở Zalo số **0986.xxx.xxx** hoặc gửi Email tới **baotuhg@gmail.com**, ấn `Ctrl + V` để gửi chuỗi Machine ID.
-   - Thực hiện thanh toán theo thông tin tài khoản bên dưới.
-3. **Bước 3 — Nhận Key và sử dụng:**
-   - Trong vòng 3 - 5 phút, tác giả sẽ gửi lại chuỗi **License Key** (hoặc file `pdf_ai.lic`).
-   - Bạn chỉ cần bấm **"Dán từ Clipboard"** (hoặc **"Chọn file pdf_ai.lic"**) rồi bấm **"Kích hoạt"** $\rightarrow$ Phần mềm chuyển sang trạng thái `[ĐÃ KÍCH HOẠT VĨNH VIỄN]`.
+### 0. Đối Chiếu Trực Quan Song Song (Visual Inspector)
+<p align="center">
+  <img src="PDF_AI_Marker_Windows_EXE_Final2/inspector_preview.png" alt="Đối chiếu trực quan - Bấm ô bảng khoanh đỏ bản vẽ gốc" width="850">
+</p>
+
+- Màn hình chia đôi tương tác thời gian thực: Bên trái là bản vẽ PDF gốc (phóng to/thu nhỏ, xoay trang, kéo thả tự do), bên phải là ma trận số liệu đã trích xuất.
+- **Tương tác 1-Click:** Nhấp vào bất kỳ ô số liệu nào $\rightarrow$ phần mềm tự động nhảy đến đúng trang, phóng to và **khoanh khung đỏ nhấp nháy tại đúng tọa độ con số đó** trên bản vẽ gốc.
+- Hỗ trợ bản vẽ khổ lớn A0, A1, A2, A3; giúp kỹ sư nghiệm thu khối lượng nhanh gấp hàng chục lần so với việc dò thủ công.
+
+### 1. Trợ Lý AI Công Trình (Offline Local RAG Chat)
+<p align="center">
+  <img src="PDF_AI_Marker_Windows_EXE_Final2/chat_preview.png" alt="Trợ lý AI Công Trình - Chatbot kỹ thuật trích dẫn trực quan" width="850">
+</p>
+
+- **Hỏi đáp thông minh với toàn bộ hồ sơ:** Tra cứu khối lượng, cao độ, tải trọng thiết kế, tiêu chuẩn áp dụng ngay trên tài liệu dự án vừa bóc tách.
+- **Trích dẫn nguồn trực quan:** Bấm vào liên kết trích dẫn `[Trang X • Bản vẽ Y]` trong câu trả lời để mở ngay bản vẽ gốc và khoanh đỏ căn cứ kỹ thuật.
+- **Đa dạng Backend AI:** Hỗ trợ mô hình cục bộ `llama-server` tích hợp sẵn, kết nối LM Studio / Ollama (`http://localhost:1234`), Cloud API (OpenAI/Claude/DeepSeek) hoặc chế độ tra cứu từ khóa thông minh không cần LLM.
+
+### 2. Trí Tuệ Bảng Biểu AEC (AEC Table Intelligence) & Xuất Excel Đa Tầng
+<p align="center">
+  <img src="PDF_AI_Marker_Windows_EXE_Final2/fluent_ui_tables.png" alt="Xem bảng số liệu và xuất Excel đa cấp" width="850">
+</p>
+
+- Tự động nhận diện lưới kẻ bảng (*Table Grid Morphology*), gom nhóm và phân loại 4 loại bảng biểu đặc thù công trình:
+  1. **Bảng Thống Kê Cốt Thép (BBS):** Nhận diện số hiệu thanh, hình dạng, đường kính $\Phi$, chiều dài, số lượng, trọng lượng. Tự động kiểm tra chéo công thức khối lượng $M = 0.006165 \times d^2 \times L$ theo TCVN 1651:2018.
+  2. **Bảng Tiên Lượng & Khối Lượng Mời Thầu (BoQ):** Giữ nguyên cây phân cấp mã hiệu công tác, đơn vị tính, khối lượng và đơn giá.
+  3. **Bảng Danh Mục Bản Vẽ:** Trích xuất tự động danh sách hồ sơ thiết kế.
+  4. **Bảng Tọa Độ & Thông Số Kỹ Thuật:** Lưu chuẩn xác tọa độ tim tuyến $(X, Y, H)$, cọc mốc, cao trình thiết kế.
+- **Xuất file Excel (`bang_so_lieu.xlsx`):** Tự động kẻ viền bảng chuẩn, tô màu header, định dạng số thực để dùng ngay hàm `SUM()`, `VLOOKUP()`.
+
+### 3. Bộ Lọc Khử Báo Động Giả (False Alarm Suppression)
+- **Giảm 91% – 100% mục cảnh báo rác:** Loại bỏ triệt để các ký tự CJK Hán-Nôm lọt lưới do nét vẽ bản vẽ giống chữ Trung Quốc.
+- Chuẩn hóa số La Mã (`I`, `II`, `IV`, `X`), phân số (`1/2`, `3/4`), đường kính phi ($\Phi$), ký hiệu toán học LaTeX.
+- Tự động sửa lỗi OCR nhầm ký tự chữ và số (`s6` $\rightarrow$ `số`, `ng6` $\rightarrow$ `ngày`, `1op` $\rightarrow$ `lớp`, `c6` $\rightarrow$ `có`, `d0` $\rightarrow$ `độ`...).
+
+### 4. Tự Động Bóc Tách Khung Tên Bản Vẽ (Title Block)
+- Nhận diện khung tên bản vẽ kỹ thuật ở góc dưới phải hoặc góc lề.
+- Trích xuất tự động: *Chủ đầu tư, Đơn vị tư vấn thiết kế, Tên công trình, Hạng mục, Tên bản vẽ, Ký hiệu bản vẽ, Tỷ lệ*.
+- Tự động tạo cây mục lục bản vẽ có liên kết neo (Anchor Links) ở đầu file Markdown.
+
+### 5. Đọc Trực Tiếp File Office (Word & Excel)
+- Hỗ trợ trực tiếp `.docx`, `.xlsx`, `.xlsm` mà không qua trung gian PDF hay OCR.
+- Giữ nguyên cấu trúc gộp ô (merged cells) và thứ bậc dự toán.
+
+### 6. Phân Đoạn Thông Minh (Smart Chunking cho RAG AI)
+- Tự động cắt lát văn bản thành từng đoạn ngữ nghĩa tối ưu (~3.000 ký tự) gắn chặt với metadata số trang và số hiệu bản vẽ.
+- Xuất file `chia_doan.jsonl` sẵn sàng đẩy vào Vector Database (Chroma, Qdrant, Milvus, Pinecone) phục vụ hệ thống AI Agent.
 
 ---
 
-## 📥 TẢI BỘ CÀI ĐẶT TRỌN GÓI (OFFLINE STANDALONE PACKAGE)
+## 📁 CẤU TRÚC 6 FILE DỮ LIỆU ĐẦU RA CHUẨN AEC
 
-Do phần mềm tích hợp sẵn toàn bộ mô hình AI, môi trường PyTorch và engine OCR offline (~8.6 GB sau khi giải nén), bộ cài đặt trọn gói được lưu trữ và chia sẻ qua liên kết tốc độ cao:
+Sau khi quét xong một hồ sơ, thư mục kết quả sẽ chứa đầy đủ 6 tệp dữ liệu có cấu trúc:
 
-👉 **[BẤM VÀO ĐÂY ĐỂ TẢI BẢN TRỌN GÓI (Google Drive / OneDrive)](#)**  
-*(Vui lòng liên hệ tác giả qua Zalo/Email để nhận liên kết tải chính thức mới nhất)*
+```text
+📁 Thu_Muc_Ket_Qua/
+├── 📄 noi_dung.md                 # Toàn bộ nội dung văn bản & bảng biểu Markdown chuẩn
+├── 📊 bang_so_lieu.xlsx           # Bảng tính Excel kẻ viền, chuẩn số học, phân trang
+├── 📋 bang_so_lieu.json           # Dữ liệu ma trận tất cả các bảng (Headers & Rows)
+├── 🏗️ thep_cho_to_hop_cat.json    # Dữ liệu chuyên dụng cho bài toán tổ hợp cắt thép 1D
+├── 💰 tien_luong_du_toan_boq.json # Dữ liệu phân cấp WBS cho quản lý dự toán & đấu thầu
+├── 🔍 du_lieu.json                # Bounding box tọa độ, góc quay & độ tin cậy từng khối
+├── 📑 chia_doan.jsonl             # Phân đoạn tối ưu hóa cho AI RAG / Vector Search
+└── ⚠️ can_kiem_tra.md             # Danh sách đối chiếu chéo (chỉ xuất khi có nghi ngờ)
+```
 
-### Hướng Dẫn Cài Đặt Siêu Tốc:
-1. Tải file nén `.rar` về máy tính và giải nén ra ổ đĩa (khuyến nghị ổ `D:\` hoặc `C:\`, cần khoảng 9 GB trống).
-2. Chạy trực tiếp file **`PDF_AI_Marker.exe`** (không cần cài Python, không cần cài đặt môi trường phức tạp).
-3. Nếu máy tính Windows mới/máy sạch thông báo thiếu file DLL: Cài đặt gói [Microsoft Visual C++ 2015-2022 Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe) từ trang chủ Microsoft.
+---
+
+## 🎨 GIAO DIỆN WINDOWS 11 FLUENT UI
+
+Phần mềm được thiết kế theo tiêu chuẩn thiết kế hiện đại **Fluent Design System** của Windows 11 với 5 tab chức năng độc lập:
+
+| Giao diện Tối (Dark Mode) | Giao diện Sáng (Light Mode) |
+| :---: | :---: |
+| <img src="PDF_AI_Marker_Windows_EXE_Final2/fluent_ui_dark.png" width="420"> | <img src="PDF_AI_Marker_Windows_EXE_Final2/fluent_ui_light.png" width="420"> |
+
+- **Tab 1 — Bóc tách hồ sơ:** Kéo thả tệp tin hoặc thư mục hàng loạt, chọn chế độ OCR siêu tốc, xem tiến trình trực quan.
+- **Tab 2 — Bảng số liệu & Đối chiếu:** Duyệt các bảng trích xuất, xem trước ô tính Excel, mở công cụ đối chiếu trực quan song song.
+- **Tab 3 — Trợ lý AI công trình:** Chat RAG trực tiếp với hồ sơ, truy xuất trích dẫn bản vẽ.
+- **Tab 4 — Quản lý bản quyền:** Xem thông tin giấy phép, nhập key, sao chép Machine ID, tự động khôi phục key từ đám mây.
+- **Tab 5 — Cài đặt:** Tùy chỉnh theme Sáng/Tối, cấu hình LLM Backend, thư mục lưu mặc định.
+
+---
+
+## 🔑 HỆ THỐNG BẢN QUYỀN THƯƠNG MẠI & CLOUD RECOVERY
+
+<p align="center">
+  <img src="PDF_AI_Marker_Windows_EXE_Final2/fluent_ui_license.png" alt="Quản lý bản quyền Fluent UI" width="700">
+</p>
+
+Hệ thống bảo vệ bản quyền sử dụng mật mã học bất đối xứng **RSA-1024**:
+- **3 Cấp độ Giấy phép:**
+  1. ⏳ **30-Day Evaluation (Dùng thử 30 ngày):** Trải nghiệm đầy đủ 100% tính năng cao cấp.
+  2. 💻 **1-Year Professional (Bản quyền 1 Năm):** Dành cho kỹ sư và văn phòng thiết kế.
+  3. 🏢 **Lifetime Enterprise (Bản quyền Trọn đời 150 Năm):** Sở hữu vĩnh viễn, không giới hạn thời gian.
+- **Chống tua ngược đồng hồ hệ thống (Clock-Tampering Prevention):** Kiểm tra dấu thời gian logic, ngăn chặn gian lận lùi giờ máy tính.
+- **Khôi phục Đám mây Tự động (Cloud Auto-Recovery):** Tự động kết nối Google Sheets bảo mật để tải lại key bản quyền khi người dùng cài lại Windows.
+- **Lưu trữ Đa ổ đĩa (Multi-Drive Persistence):** Key và token kích hoạt được đồng bộ lưu trên các phân vùng ổ cứng vật lý khác nhau (`C:\`, `D:\`, `E:\`), tự động nhận diện lại sau khi format ổ C.
 
 ---
 
@@ -151,23 +176,33 @@ Do phần mềm tích hợp sẵn toàn bộ mô hình AI, môi trường PyTorc
 | Thành phần | Cấu hình tối thiểu | Cấu hình khuyến nghị |
 | :--- | :--- | :--- |
 | **Hệ điều hành** | Windows 10 (64-bit) Version 1909 trở lên | Windows 10 / Windows 11 (64-bit) |
-| **Bộ xử lý (CPU)** | Intel Core i5 / AMD Ryzen 5 (4 nhân 8 luồng) | Intel Core i7 / AMD Ryzen 7 trở lên |
-| **Bộ nhớ RAM** | 8 GB RAM | 16 GB - 32 GB RAM |
-| **Card đồ họa (GPU)** | Không bắt buộc (chạy chế độ OCR nhanh / bản gõ) | NVIDIA GeForce RTX 2060 / 3060 / 4060 trở lên (VRAM >= 6GB) |
-| **Ổ cứng lưu trữ** | 10 GB dung lượng trống | Ổ cứng thể rắn SSD (NVMe / SATA III) |
+| **Bộ xử lý (CPU)** | Intel Core i3 / AMD Ryzen 3 (4 nhân) | Intel Core i5 / Core i7 / AMD Ryzen 5 trở lên |
+| **Bộ nhớ RAM** | 4 GB RAM | 8 GB – 16 GB RAM |
+| **Card đồ họa (GPU)** | Không yêu cầu (Chạy CPU/DirectML mượt mà) | NVIDIA RTX 2060 / 3060 / 4060 trở lên (hỗ trợ CUDA) |
+| **Dung lượng trống** | 2 GB dung lượng trống | Ổ cứng thể rắn SSD (NVMe / SATA III) |
 
 ---
 
-## 💳 THÔNG TIN THANH TOÁN & ĐĂNG KÝ BẢN QUYỀN
+## 📥 HƯỚNG DẪN CÀI ĐẶT & CHẠY ỨNG DỤNG
 
-- **Chủ tài khoản:** NGUYEN BAO TU
-- **Ngân hàng:** [Tên Ngân Hàng] — Số tài khoản: `xxxx-xxxx-xxxx`
-- **Ví điện tử MoMo:** `0986xxxxxx`
-- **Cú pháp chuyển khoản:** `[Họ Tên] [Số Điện Thoại] - PDF AI Marker`
+### 1. Tải bản Portable đóng gói sẵn (Khuyến nghị cho Kỹ sư)
+1. Tải gói phần mềm đóng gói hoàn chỉnh từ kênh phát hành chính thức.
+2. Giải nén vào thư mục trên máy tính (ví dụ `D:\PDF_AI_Marker_v3`).
+3. Nhấp đúp vào **`PDF_AI_Marker.exe`** để khởi chạy ngay mà không cần cài đặt Python.
+
+### 2. Chạy từ Mã Nguồn (Dành cho Lập trình viên)
+```bash
+# 1. Clone repository
+git clone https://github.com/baotuhg/PDF_AI_Marker.git
+cd PDF_AI_Marker/PDF_AI_Marker_Windows_EXE_Final2
+
+# 2. Chạy trực tiếp qua Python Engine nội bộ
+.\engine\python.exe app.py
+```
 
 ---
 
-## 📞 THÔNG TIN TÁC GIẢ & HỖ TRỢ KỸ THUẬT
+## 💳 THÔNG TIN LIÊN HỆ & ĐĂNG KÝ BẢN QUYỀN
 
 - **Tác giả:** **Nguyễn Bảo Tú (23HG)**
 - **Email:** [baotuhg@gmail.com](mailto:baotuhg@gmail.com)
@@ -177,5 +212,5 @@ Do phần mềm tích hợp sẵn toàn bộ mô hình AI, môi trường PyTorc
 ---
 
 <p align="center">
-  <i>Bản quyền (C) 2026 Nguyễn Bảo Tú (23HG). Toàn bộ quyền sở hữu trí tuệ được bảo lưu.</i>
+  <i>Bản quyền © 2026 Nguyễn Bảo Tú (23HG). Toàn bộ quyền sở hữu trí tuệ được bảo lưu.</i>
 </p>

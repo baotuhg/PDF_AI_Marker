@@ -8,6 +8,7 @@ added_files = [
     ('fluent_theme.py', '.'),
     ('theme_config.json', '.'),
     ('table_agent.py', '.'),
+    ('vn_diacritics.py', '.'),
     ('license_core.py', '.'),
     ('license_dialog.py', '.'),
     ('license_cloud.py', '.'),
@@ -27,6 +28,7 @@ a = Analysis(
     hiddenimports=[
         'fluent_theme',
         'table_agent',
+        'vn_diacritics',
         'license_core',
         'license_dialog',
         'license_cloud',

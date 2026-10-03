@@ -361,7 +361,7 @@ def run_office(request, session):
 ENGINE_NAMES = {
     "office": "python-docx / openpyxl (đọc trực tiếp Word/Excel, không OCR) + LayoutReconstructor v3",
     "fast_text": "pdftext (+TCVN3/VNI, chú thích SHX, OCR bổ sung chữ SHX nét vẽ) + LayoutReconstructor v3",
-    "rapid_ocr": "RapidOCR PP-OCRv4 (200 DPI, chia ô) + LayoutReconstructor v3",
+    "rapid_ocr": "RapidOCR PP-OCRv4 + Khôi phục dấu AEC + CLAHE + LayoutReconstructor v3",
     "vn_ocr": "RapidOCR PP-OCRv4 + Surya 2 (đọc dấu tiếng Việt) + LayoutReconstructor v3",
 }
 

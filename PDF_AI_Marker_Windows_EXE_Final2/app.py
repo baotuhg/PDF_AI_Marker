@@ -46,8 +46,8 @@ from fluent_theme import get_current_theme, save_current_theme, get_theme_qss
 
 # (mã chế độ cho marker_worker, nhãn hiển thị)
 MODES = [
-    ('vn_ocr', '[Khuyến dùng] OCR tiếng Việt có dấu – bản vẽ/scan (~15–40s/trang • cần GPU NVIDIA)'),
-    ('rapid_ocr', '[Nhanh] Quét OCR không dấu – bản vẽ/scan (~5–8s/trang)'),
+    ('rapid_ocr', '[Siêu tốc] OCR Tiếng Việt Chuyên ngành AEC – bản vẽ/scan (~3–5s/trang • Khuyên dùng)'),
+    ('vn_ocr', '[Chuyên sâu] VLM Tiếng Việt Chi tiết – bản vẽ/scan (~15–40s/trang • cần GPU NVIDIA)'),
     ('fast_text', '[Siêu nhanh] PDF bản gõ / bản vẽ AutoCAD, tự đọc chữ SHX (~0.3–7s/trang)'),
     ('auto', '[Marker] AI phân tích bố cục + OCR (tài liệu văn bản, sách)'),
     ('ocr', '[Marker OCR] Nhận dạng AI toàn bộ trang'),
@@ -421,10 +421,10 @@ class App(QMainWindow):
         l_run.addWidget(self.progress)
 
         _gpu = detect_nvidia_gpu()
-        self.mode.setCurrentIndex(0 if _gpu else 1)
+        self.mode.setCurrentIndex(0)
         self.status = QLabel(
-            f'PDF AI v3 | {"GPU: " + _gpu if _gpu else "Không có GPU NVIDIA"} | '
-            'Tiếng Việt có dấu ~15–40s/trang (GPU) | OCR nhanh ~5–8s/trang | Bản gõ ~0.3s/trang'
+            f'PDF AI v3 | {"GPU: " + _gpu if _gpu else "Chạy CPU/DirectML"} | '
+            'OCR Tiếng Việt AEC Siêu tốc ~3–5s/trang | VLM GPU ~15–40s/trang | Bản gõ ~0.3s/trang'
         )
         self.status.setWordWrap(True)
         l_run.addWidget(self.status)
@@ -434,14 +434,16 @@ class App(QMainWindow):
         self.preview.setMinimumHeight(180)
         self.preview.setPlainText(
             'Chọn file PDF, Word (.docx) hoặc Excel (.xlsx), chọn cách đọc rồi bấm Chuyển đổi cho AI. Chạy 100% offline.\n\n'
-            '[Khuyến dùng] OCR tiếng Việt có dấu (~15–40s/trang, cần GPU NVIDIA):\n'
-            '  Bản vẽ scan, hồ sơ thiết kế: giữ dấu tiếng Việt, dựng bảng theo đường kẻ ô,\n'
-            '  tách khung tên (số hiệu, tên bản vẽ, tỷ lệ), dấu thẩm định, ghi chú kích thước.\n'
-            '  Chữ số được kiểm tra chéo giữa 2 bộ OCR; chỗ lệch đánh dấu ⟦OCR khác: ...⟧.\n\n'
-            '[Nhanh] Quét OCR không dấu (~5–8s/trang): như trên nhưng không đọc dấu tiếng Việt.\n\n'
+            '[Siêu tốc] OCR Tiếng Việt Chuyên ngành AEC (~3–5s/trang • Khuyên dùng):\n'
+            '  Nhận diện siêu tốc với RapidOCR + Tự động khôi phục dấu Tiếng Việt chuyên ngành AEC (cầu đường, kết cấu,\n'
+            '  dự toán, địa chất).\n'
+            '  Khử nhiễu tăng tương phản CLAHE, tự xoay chữ dọc 90°, dựng bảng lưới và bảo toàn 100% số liệu đo đạc.\n\n'
+            '[Chuyên sâu] VLM Tiếng Việt Chi tiết (~15–40s/trang, cần GPU NVIDIA):\n'
+            '  Bản vẽ scan, hồ sơ thiết kế: giữ dấu tiếng Việt qua mô hình thị giác đa thể thức Surya VLM,\n'
+            '  tách khung tên, dấu thẩm định, kiểm tra chéo 2 bộ OCR độc lập.\n\n'
             '[Siêu nhanh] Đọc chữ bản gõ PDF (~0.3s/trang): PDF xuất từ Word/Excel/AutoCAD,\n'
             '  vẫn dựng bảng và khung tên; tự chuyển font cũ TCVN3 (.VnTime) và VNI (VNI-Times).\n\n'
-            'Kết quả: noi_dung.md • bang_so_lieu.json • bang_so_lieu.xlsx • du_lieu.json • chia_doan.jsonl • can_kiem_tra.md'
+            'Kết quả: noi_dung.md • bang_so_lieu.json • bang_so_lieu.xlsx • thep_cho_to_hop_cat.json • tien_luong_du_toan_boq.json • can_kiem_tra.md'
         )
         l_run.addWidget(self.preview, 1)
 
