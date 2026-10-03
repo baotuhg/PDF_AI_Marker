@@ -7,6 +7,8 @@ block_cipher = None
 added_files = [
     ('license_core.py', '.'),
     ('license_dialog.py', '.'),
+    ('license_cloud.py', '.'),
+    ('cloud_config.json', '.'),
     ('md_postprocess.py', '.'),
     ('app_icon.ico', '.'),
     ('app_icon.png', '.'),
@@ -22,6 +24,7 @@ a = Analysis(
     hiddenimports=[
         'license_core',
         'license_dialog',
+        'license_cloud',
         'inspector',
         'chat_window',
         'rag_engine',

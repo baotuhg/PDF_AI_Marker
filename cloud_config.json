@@ -1,0 +1,7 @@
+{
+  "enabled": true,
+  "api_url": "https://script.google.com/macros/s/AKfycbz_SAMPLE_REPLACE_WITH_YOUR_URL/exec",
+  "timeout_sec": 3.5,
+  "version": "3.0",
+  "description": "Cấu hình tự động khôi phục bản quyền qua Google Apps Script (PDF AI Marker v3 - Nguyễn Bảo Tú 23HG)"
+}
