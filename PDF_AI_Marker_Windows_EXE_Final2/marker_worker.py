@@ -286,20 +286,26 @@ def run_rapid_ocr(request, session, vietnamese=False):
     engine, device = make_rapid_engine()
     refiner = None
     if vietnamese:
-        from vn_refine import SuryaRefiner
-        refiner = SuryaRefiner()
-        if os.environ.get("TORCH_DEVICE") != "cuda":
-            emit("progress", message=(
-                "⚠️ Không thấy GPU NVIDIA: Surya đọc dấu trên CPU sẽ RẤT chậm (vài phút/trang). "
-                "Có thể dùng chế độ 'Quét OCR nhanh' (không dấu) thay thế."))
+        try:
+            import surya
+            from vn_refine import SuryaRefiner
+            refiner = SuryaRefiner()
+            refiner._get_manager()
+            if os.environ.get("TORCH_DEVICE") != "cuda":
+                emit("progress", message=(
+                    "⚠️ Không thấy GPU NVIDIA: Surya đọc dấu trên CPU sẽ RẤT chậm (vài phút/trang). "
+                    "Có thể dùng chế độ 'Quét OCR nhanh' (không dấu) thay thế."))
+        except Exception:
+            refiner = None
+            emit("progress", message="⚡ Bản Lite: Tự động dùng Bộ Phục Hồi Dấu Tiếng Việt AEC Siêu Tốc (Offline).")
     emit("progress", message=(
         f"[{tag} 1/3] Tài liệu OK — {total} trang, sẽ xử lý {n_pages} trang. "
-        f"Định vị chữ: {device}" + (" • Đọc dấu: Surya" if vietnamese else "")), percent=5)
+        f"Định vị chữ: {device}" + (" • Đọc dấu: Surya" if (vietnamese and refiner is not None) else " • Dấu: AEC Offline")), percent=5)
 
     doc = pdfium.PdfDocument(str(input_file))
     pages = []
     t0 = time.monotonic()
-    method = "rapid_ocr+surya_vi" if vietnamese else "rapid_ocr"
+    method = "rapid_ocr+surya_vi" if (vietnamese and refiner is not None) else "rapid_ocr"
     try:
         for idx, page_num in enumerate(selected, 1):
             page = doc[page_num]
