@@ -9,6 +9,12 @@ CÀI ĐẶT
 - Nên có GPU NVIDIA (driver mới) cho chế độ OCR tiếng Việt có dấu. Máy không có GPU NVIDIA vẫn chạy
   được các chế độ còn lại.
 
+KÍCH HOẠT BẢN QUYỀN
+- Trong lần mở đầu tiên, phần mềm sẽ hiển thị cửa sổ kích hoạt bản quyền thương mại.
+- Mã máy (Machine ID) đã tự động được sao chép vào Clipboard (chỉ cần ấn Ctrl+V gửi Zalo/Email).
+- Gửi mã này cho tác giả: Nguyễn Bảo Tú (Email: baotuhg@gmail.com | Zalo: 0986.xxx.xxx) để nhận mã kích hoạt.
+- Dán mã kích hoạt (hoặc chọn file license) rồi bấm "Kích hoạt" để sử dụng vĩnh viễn.
+
 CHỌN CHẾ ĐỘ
 - [Khuyến dùng] OCR tiếng Việt có dấu (~15–40s/trang, cần GPU NVIDIA): bản vẽ scan, hồ sơ scan,
   bản vẽ AutoCAD chữ SHX dạng nét vẽ.

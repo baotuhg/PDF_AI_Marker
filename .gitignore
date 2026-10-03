@@ -49,3 +49,5 @@ build/
 dist/
 **/build/
 **/dist/
+exclude.txt
+*.rar
