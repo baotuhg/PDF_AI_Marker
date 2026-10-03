@@ -1,7 +1,7 @@
 {
   "version": "1.0",
-  "last_updated": "2026-10-04T00:54:40.286647",
-  "total_documents_read": 4,
+  "last_updated": "2026-10-04T02:37:54.826120",
+  "total_documents_read": 25,
   "learned_phrases": {
     "ky tuc xa": "ký túc xá",
     "phong hoc": "phòng học",
@@ -109,7 +109,12 @@
     "BASTAF": "Bể tự hoại xử lý nước thải Bastaf",
     "TH": "Tiểu học",
     "BTCT": "Bê tông cốt thép",
-    "THCS": "Trung học Cơ sở"
+    "THCS": "Trung học Cơ sở",
+    "TBA": "Trạm Biến áp",
+    "HDPE": "Ống nhựa HDPE",
+    "PCCC": "Phòng cháy Chữa cháy",
+    "TMB": "Tổng mặt bằng",
+    "uPVC": "Ống nhựa uPVC"
   },
   "history_log": [
     {
@@ -181,6 +186,384 @@
         "phrases": 61,
         "unstick_rules": 36,
         "abbreviations": 4,
+        "table_aliases": 0
+      }
+    },
+    {
+      "epoch": 5,
+      "document": "Hệ thống đèn chiếu sáng sân đường nội bộ.pdf",
+      "pages": 18,
+      "timestamp": "2026-10-04 00:58:38",
+      "lessons_learned": {
+        "new_phrases": 0,
+        "new_unstick": 0,
+        "new_abbr": 2,
+        "new_headers": 0
+      },
+      "cumulative_memory": {
+        "phrases": 61,
+        "unstick_rules": 36,
+        "abbreviations": 6,
+        "table_aliases": 0
+      }
+    },
+    {
+      "epoch": 6,
+      "document": "Đường dây 35 Kv, trạm biến áp và đường dây 0,4Kv.pdf",
+      "pages": 36,
+      "timestamp": "2026-10-04 01:01:46",
+      "lessons_learned": {
+        "new_phrases": 0,
+        "new_unstick": 0,
+        "new_abbr": 0,
+        "new_headers": 0
+      },
+      "cumulative_memory": {
+        "phrases": 61,
+        "unstick_rules": 36,
+        "abbreviations": 6,
+        "table_aliases": 0
+      }
+    },
+    {
+      "epoch": 7,
+      "document": "Cải tạo nhà lớp học 2 tầng thành nhà chức năng (Nhà số 3A).pdf",
+      "pages": 37,
+      "timestamp": "2026-10-04 01:03:46",
+      "lessons_learned": {
+        "new_phrases": 0,
+        "new_unstick": 0,
+        "new_abbr": 0,
+        "new_headers": 0
+      },
+      "cumulative_memory": {
+        "phrases": 61,
+        "unstick_rules": 36,
+        "abbreviations": 6,
+        "table_aliases": 0
+      }
+    },
+    {
+      "epoch": 8,
+      "document": "Cải tạo nhà lớp học 2 tầng 8 phòng học (Nhà số 6A1).pdf",
+      "pages": 41,
+      "timestamp": "2026-10-04 01:06:21",
+      "lessons_learned": {
+        "new_phrases": 0,
+        "new_unstick": 0,
+        "new_abbr": 0,
+        "new_headers": 0
+      },
+      "cumulative_memory": {
+        "phrases": 61,
+        "unstick_rules": 36,
+        "abbreviations": 6,
+        "table_aliases": 0
+      }
+    },
+    {
+      "epoch": 9,
+      "document": "Khu học thông thường 2 phòng học (Nhà số 6A).pdf",
+      "pages": 44,
+      "timestamp": "2026-10-04 01:08:48",
+      "lessons_learned": {
+        "new_phrases": 0,
+        "new_unstick": 0,
+        "new_abbr": 0,
+        "new_headers": 0
+      },
+      "cumulative_memory": {
+        "phrases": 61,
+        "unstick_rules": 36,
+        "abbreviations": 6,
+        "table_aliases": 0
+      }
+    },
+    {
+      "epoch": 10,
+      "document": "10. Cải tạo nhà 3 tầng thành nhà hiệu bộ và chức năng (Nhà số 3).pdf",
+      "pages": 48,
+      "timestamp": "2026-10-04 01:12:01",
+      "lessons_learned": {
+        "new_phrases": 0,
+        "new_unstick": 0,
+        "new_abbr": 0,
+        "new_headers": 0
+      },
+      "cumulative_memory": {
+        "phrases": 61,
+        "unstick_rules": 36,
+        "abbreviations": 6,
+        "table_aliases": 0
+      }
+    },
+    {
+      "epoch": 11,
+      "document": "Cấp nước sinh hoạt đầu nguồn.pdf",
+      "pages": 48,
+      "timestamp": "2026-10-04 01:17:02",
+      "lessons_learned": {
+        "new_phrases": 0,
+        "new_unstick": 0,
+        "new_abbr": 0,
+        "new_headers": 0
+      },
+      "cumulative_memory": {
+        "phrases": 61,
+        "unstick_rules": 36,
+        "abbreviations": 6,
+        "table_aliases": 0
+      }
+    },
+    {
+      "epoch": 12,
+      "document": "6. Cải tạo nhà ở ký túc xá tiểu học (Nhà số 23) ok.pdf",
+      "pages": 50,
+      "timestamp": "2026-10-04 01:21:31",
+      "lessons_learned": {
+        "new_phrases": 0,
+        "new_unstick": 0,
+        "new_abbr": 0,
+        "new_headers": 0
+      },
+      "cumulative_memory": {
+        "phrases": 61,
+        "unstick_rules": 36,
+        "abbreviations": 6,
+        "table_aliases": 0
+      }
+    },
+    {
+      "epoch": 13,
+      "document": "Tổng mặt bằng, Cổng hàng rào, kè đá, cột cờ….pdf",
+      "pages": 50,
+      "timestamp": "2026-10-04 01:24:39",
+      "lessons_learned": {
+        "new_phrases": 0,
+        "new_unstick": 0,
+        "new_abbr": 2,
+        "new_headers": 0
+      },
+      "cumulative_memory": {
+        "phrases": 61,
+        "unstick_rules": 36,
+        "abbreviations": 8,
+        "table_aliases": 0
+      }
+    },
+    {
+      "epoch": 14,
+      "document": "Các dãy nhà phá dỡ.pdf",
+      "pages": 53,
+      "timestamp": "2026-10-04 01:26:40",
+      "lessons_learned": {
+        "new_phrases": 0,
+        "new_unstick": 0,
+        "new_abbr": 0,
+        "new_headers": 0
+      },
+      "cumulative_memory": {
+        "phrases": 61,
+        "unstick_rules": 36,
+        "abbreviations": 8,
+        "table_aliases": 0
+      }
+    },
+    {
+      "epoch": 15,
+      "document": "2. Khu học thông thường khối tiểu học (Nhà số 4)ok.pdf",
+      "pages": 60,
+      "timestamp": "2026-10-04 01:32:29",
+      "lessons_learned": {
+        "new_phrases": 0,
+        "new_unstick": 0,
+        "new_abbr": 0,
+        "new_headers": 0
+      },
+      "cumulative_memory": {
+        "phrases": 61,
+        "unstick_rules": 36,
+        "abbreviations": 8,
+        "table_aliases": 0
+      }
+    },
+    {
+      "epoch": 16,
+      "document": "7. Khu học bộ môn liên cấp TH & THCS 3 tầng (Nhà số 5+7) ok.pdf",
+      "pages": 61,
+      "timestamp": "2026-10-04 01:39:07",
+      "lessons_learned": {
+        "new_phrases": 0,
+        "new_unstick": 0,
+        "new_abbr": 0,
+        "new_headers": 0
+      },
+      "cumulative_memory": {
+        "phrases": 61,
+        "unstick_rules": 36,
+        "abbreviations": 8,
+        "table_aliases": 0
+      }
+    },
+    {
+      "epoch": 17,
+      "document": "5. Cải tạo Nhà bếp ăn (Nhà 17và 17A) ok.pdf",
+      "pages": 66,
+      "timestamp": "2026-10-04 01:43:09",
+      "lessons_learned": {
+        "new_phrases": 0,
+        "new_unstick": 0,
+        "new_abbr": 0,
+        "new_headers": 0
+      },
+      "cumulative_memory": {
+        "phrases": 61,
+        "unstick_rules": 36,
+        "abbreviations": 8,
+        "table_aliases": 0
+      }
+    },
+    {
+      "epoch": 18,
+      "document": "Khu học thông thường khối TH (Nhà số 6).pdf",
+      "pages": 68,
+      "timestamp": "2026-10-04 01:48:23",
+      "lessons_learned": {
+        "new_phrases": 0,
+        "new_unstick": 0,
+        "new_abbr": 0,
+        "new_headers": 0
+      },
+      "cumulative_memory": {
+        "phrases": 61,
+        "unstick_rules": 36,
+        "abbreviations": 8,
+        "table_aliases": 0
+      }
+    },
+    {
+      "epoch": 19,
+      "document": "8. Ký túc xá giáo viên (Nhà số 11) ok.pdf",
+      "pages": 76,
+      "timestamp": "2026-10-04 01:54:33",
+      "lessons_learned": {
+        "new_phrases": 0,
+        "new_unstick": 0,
+        "new_abbr": 0,
+        "new_headers": 0
+      },
+      "cumulative_memory": {
+        "phrases": 61,
+        "unstick_rules": 36,
+        "abbreviations": 8,
+        "table_aliases": 0
+      }
+    },
+    {
+      "epoch": 20,
+      "document": "Nhà thi đấu đa năng (Nhà số 8).pdf",
+      "pages": 82,
+      "timestamp": "2026-10-04 01:58:39",
+      "lessons_learned": {
+        "new_phrases": 0,
+        "new_unstick": 0,
+        "new_abbr": 0,
+        "new_headers": 0
+      },
+      "cumulative_memory": {
+        "phrases": 61,
+        "unstick_rules": 36,
+        "abbreviations": 8,
+        "table_aliases": 0
+      }
+    },
+    {
+      "epoch": 21,
+      "document": "3. Ký túc xá nữ TH (Nhà số 14) ok.pdf",
+      "pages": 84,
+      "timestamp": "2026-10-04 02:04:56",
+      "lessons_learned": {
+        "new_phrases": 0,
+        "new_unstick": 0,
+        "new_abbr": 0,
+        "new_headers": 0
+      },
+      "cumulative_memory": {
+        "phrases": 61,
+        "unstick_rules": 36,
+        "abbreviations": 8,
+        "table_aliases": 0
+      }
+    },
+    {
+      "epoch": 22,
+      "document": "4. Ký túc xá nam TH (Nhà số 15)ok.pdf",
+      "pages": 85,
+      "timestamp": "2026-10-04 02:11:21",
+      "lessons_learned": {
+        "new_phrases": 0,
+        "new_unstick": 0,
+        "new_abbr": 0,
+        "new_headers": 0
+      },
+      "cumulative_memory": {
+        "phrases": 61,
+        "unstick_rules": 36,
+        "abbreviations": 8,
+        "table_aliases": 0
+      }
+    },
+    {
+      "epoch": 23,
+      "document": "Cấp thoát nước.pdf",
+      "pages": 101,
+      "timestamp": "2026-10-04 02:17:51",
+      "lessons_learned": {
+        "new_phrases": 0,
+        "new_unstick": 0,
+        "new_abbr": 1,
+        "new_headers": 0
+      },
+      "cumulative_memory": {
+        "phrases": 61,
+        "unstick_rules": 36,
+        "abbreviations": 9,
+        "table_aliases": 0
+      }
+    },
+    {
+      "epoch": 24,
+      "document": "Ký túc xá nam THCS  (Nhà số 12).pdf",
+      "pages": 117,
+      "timestamp": "2026-10-04 02:27:54",
+      "lessons_learned": {
+        "new_phrases": 0,
+        "new_unstick": 0,
+        "new_abbr": 0,
+        "new_headers": 0
+      },
+      "cumulative_memory": {
+        "phrases": 61,
+        "unstick_rules": 36,
+        "abbreviations": 9,
+        "table_aliases": 0
+      }
+    },
+    {
+      "epoch": 25,
+      "document": "1. Ký túc xá nữ THCS (Nhà số 13)ok.pdf",
+      "pages": 119,
+      "timestamp": "2026-10-04 02:37:54",
+      "lessons_learned": {
+        "new_phrases": 0,
+        "new_unstick": 0,
+        "new_abbr": 0,
+        "new_headers": 0
+      },
+      "cumulative_memory": {
+        "phrases": 61,
+        "unstick_rules": 36,
+        "abbreviations": 9,
         "table_aliases": 0
       }
     }

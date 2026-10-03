@@ -48,6 +48,12 @@ def run_learning_cycle(file_list, output_base_dir):
         print(f"📖 [HỒ SƠ {idx}/{len(file_list)}] BẮT ĐẦU ĐỌC: '{pdf_file.name}'")
         print(f"   Dung lượng: {pdf_file.stat().st_size / (1024*1024):.2f} MB")
         
+        engine.load_db()
+        already_learned = any(h.get("document") == pdf_file.name for h in engine.knowledge.get("history_log", []))
+        if already_learned:
+            print(f"   ⏩ Đã học hồ sơ '{pdf_file.name}' ở Epoch trước, chuyển tiếp sang hồ sơ mới...")
+            continue
+
         t0 = time.time()
         doc_out = out_dir / pdf_file.stem
         doc_out.mkdir(parents=True, exist_ok=True)
@@ -97,13 +103,20 @@ if __name__ == "__main__":
         folder = Path(sys.argv[1])
         files = sorted(folder.glob("*.pdf"))
     else:
-        # Mặc định lấy các file mẫu nhỏ trước từ công trình Phố Bảng
+        # Đọc toàn bộ file trong thư mục công trình Phố Bảng
         base = Path(r"D:\Tú\Trường PTTHNT LCTH&THCS Phố Bảng\BV-DT\HS TK CÔNG TRÌNH PHỐ BẢNG\Hồ sơ thiết kế bản vẽ các hạng mục")
-        files = [
-            base / "9. Bể xử lý nước thải Bastaf (02CK) ok.pdf",      # 7 trang
-            base / "San nền.pdf",                                     # 11 trang
-            base / "Sân bóng đá ( số 9).pdf",                         # 13 trang
-        ]
+        all_pdfs = list(base.glob("*.pdf"))
+        
+        # Sắp xếp hồ sơ từ ít trang đến nhiều trang (từ dễ đến khó để bộ não tích lũy dần)
+        import pypdfium2 as pdfium
+        def get_page_count(f):
+            try:
+                d = pdfium.PdfDocument(str(f))
+                return len(d)
+            except Exception:
+                return 9999
+        all_pdfs.sort(key=get_page_count)
+        files = all_pdfs
     
     out_dir = Path(r"D:\Code\PDF_AI_Marker_v3\KetQua_TuHoc_PhốBảng")
     run_learning_cycle(files, out_dir)
