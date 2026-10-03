@@ -280,9 +280,38 @@ def cluster_items_into_lines(items: List[Dict[str, Any]], y_tolerance: float = 0
     return lines
 
 
+class _Cell(str):
+    """Chuỗi nội dung ô bảng kèm tọa độ (.box = [x0, y0, x1, y1], hệ base_scale).
+
+    Là str thật nên mọi xử lý chuỗi/JSON cũ giữ nguyên; .box chỉ dùng để xuất
+    `cell_boxes` cho trình Đối chiếu trực quan (click ô -> khung đỏ trên trang)."""
+    box = None
+
+
+def _items_box(items: List[Dict[str, Any]]) -> Optional[List[float]]:
+    if not items:
+        return None
+    return [min(it["x_min"] for it in items), min(it["y_min"] for it in items),
+            max(it["x_max"] for it in items), max(it["y_max"] for it in items)]
+
+
+def _cell(text: str, box: Optional[List[float]]) -> str:
+    if not text or box is None:
+        return text
+    c = _Cell(text)
+    c.box = box
+    return c
+
+
+def _keep_box(src: str, text: str) -> str:
+    """Giữ tọa độ của ô khi nội dung được biến đổi (strip...)."""
+    return _cell(text, getattr(src, "box", None))
+
+
 def _join_items(items: List[Dict[str, Any]]) -> str:
-    return " ".join(" ".join(it["text"] for it in l["items"])
+    text = " ".join(" ".join(it["text"] for it in l["items"])
                     for l in cluster_items_into_lines(items)).strip()
+    return _cell(text, _items_box(items))
 
 
 def _median_h(items: List[Dict[str, Any]]) -> float:
@@ -359,7 +388,7 @@ def _clean_rows(rows: List[List[str]]) -> List[List[str]]:
     ncol = max(len(r) for r in rows)
     rows = [r + [""] * (ncol - len(r)) for r in rows]
     keep = [i for i in range(ncol) if any(r[i].strip() for r in rows)]
-    return [[r[i].strip() for i in keep] for r in rows]
+    return [[_keep_box(r[i], r[i].strip()) for i in keep] for r in rows]
 
 
 def split_header(rows: List[List[str]]) -> Tuple[List[str], List[List[str]]]:
@@ -408,7 +437,17 @@ def make_table(rows: List[List[str]], title: str, bbox: Optional[List[float]], s
             return None
     header, body = split_header(rows)
     style = detect_number_style([c for r in body for c in r])
-    return {
+
+    def _rb(b):
+        return [round(v, 1) for v in b] if b else None
+
+    cell_boxes = [[_rb(getattr(c, "box", None)) for c in r] for r in body]
+    has_boxes = any(b for r in cell_boxes for b in r)
+    if not bbox and has_boxes:
+        all_b = [b for r in cell_boxes for b in r if b]
+        bbox = [min(b[0] for b in all_b), min(b[1] for b in all_b),
+                max(b[2] for b in all_b), max(b[3] for b in all_b)]
+    table = {
         "title": title or "Bảng (không có tiêu đề)",
         "bbox": [round(v, 1) for v in bbox] if bbox else None,
         "source": source,
@@ -417,6 +456,9 @@ def make_table(rows: List[List[str]], title: str, bbox: Optional[List[float]], s
         "values": [[parse_number(c, style) for c in r] for r in body],
         "number_style": style,
     }
+    if has_boxes:
+        table["cell_boxes"] = cell_boxes
+    return table
 
 
 def table_to_markdown(table: Dict[str, Any]) -> str:
@@ -560,11 +602,12 @@ def text_table_rows(table_lines: List[Dict[str, Any]], col_tolerance: float = 45
 
     rows: List[List[str]] = []
     for l in table_lines:
-        row = [""] * num_cols
+        cells: List[List[Dict[str, Any]]] = [[] for _ in range(num_cols)]
         for it in l["items"]:
             best = min(range(num_cols), key=lambda i: abs(it["x_min"] - col_clusters[i]["mean"]))
-            row[best] = (row[best] + " " + it["text"].strip()).strip()
-        rows.append(row)
+            if it["text"].strip():
+                cells[best].append(it)
+        rows.append([_cell(" ".join(it["text"].strip() for it in c), _items_box(c)) for c in cells])
     return rows
 
 

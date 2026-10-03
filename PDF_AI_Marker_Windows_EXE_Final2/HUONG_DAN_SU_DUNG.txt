@@ -25,11 +25,23 @@ CHỌN CHẾ ĐỘ
 
 KẾT QUẢ (mỗi file PDF một thư mục <tên file>_Marker)
 - noi_dung.md        : toàn bộ nội dung, mục lục bản vẽ ở đầu, mỗi trang "## [Trang N]".
-- bang_so_lieu.json  : tất cả bảng số liệu (header / rows / values đã chuẩn hóa số).
-- du_lieu.json       : dữ liệu đầy đủ theo trang (khung tên, bảng, chữ độ tin cậy thấp).
+- bang_so_lieu.json  : tất cả bảng số liệu (header / rows / values đã chuẩn hóa số, tọa độ từng ô).
+- bang_so_lieu.xlsx  : bảng số liệu dạng Excel, mỗi bảng một sheet, cột số dùng SUM() được ngay.
+- du_lieu.json       : dữ liệu đầy đủ theo trang (khung tên, bảng, chữ độ tin cậy thấp, tọa độ).
 - chia_doan.jsonl    : các đoạn ~3000 ký tự kèm nguồn/trang/bản vẽ để nạp RAG.
 - can_kiem_tra.md    : chữ/số cần đối chiếu với PDF gốc.
 - goi_y_cho_AI.txt   : gửi kèm cho AI để AI hiểu định dạng số và ký hiệu ⟦OCR khác: ...⟧.
+
+ĐỐI CHIẾU TRỰC QUAN (MỚI)
+- Sau khi chuyển đổi xong, bấm nút "🔍 Đối chiếu trực quan" (hoặc mở lại kết quả cũ bằng
+  "📂 Mở kết quả…" trong cửa sổ đối chiếu, chọn thư mục <tên file>_Marker).
+- Bên trái: bản vẽ PDF gốc. Ctrl + lăn chuột = phóng to/thu nhỏ, kéo chuột = di chuyển,
+  Ctrl+0 = vừa trang, PgUp/PgDn = đổi trang.
+- Bên phải, tab "📊 Bảng số liệu": bấm vào một ô (hoặc dùng phím mũi tên) → khung ĐỎ nhấp nháy
+  hiện đúng vị trí con số đó trên bản vẽ gốc.
+- Tab "⚠️ Cần đối chiếu": bấm từng mục để nhảy tới chữ/số OCR độ tin cậy thấp.
+- Tab "📑 Khung tên": số hiệu, tên bản vẽ, tỷ lệ… của trang đang xem.
+- Nếu đã di chuyển file PDF gốc: bấm "📄 Chọn PDF gốc…" để chỉ lại file.
 
 DÒNG LỆNH (tùy chọn)
   engine\python.exe reprocess_pdf_to_clean_markdown.py "file.pdf" "thu_muc_xuat" all vn_ocr

@@ -64,6 +64,8 @@ class App(QMainWindow):
         self.busy = False
         self.latest = ''
         self.result_dir = None
+        self.history = []  # (thư mục kết quả, file gốc, mật khẩu) để mở Đối chiếu trực quan
+        self.inspector = None
         self.setStyleSheet("""
             QMainWindow, QWidget { background: #f3f6fb; color: #19324e; font: 10pt 'Segoe UI'; }
             QPushButton { background: white; border: 1px solid #d7e0ec; border-radius: 7px; padding: 9px 15px; }
@@ -137,7 +139,7 @@ class App(QMainWindow):
         self.pages.setPlaceholderText('Dể trống = tất cả; ví dụ 1-3,5')
         row.addWidget(self.pages, 1)
         layout.addLayout(row)
-        layout.addWidget(QLabel('Xuất: Markdown • Bảng số liệu JSON (số đã chuẩn hóa) • Khung tên • Chia đoạn cho RAG • Danh sách cần đối chiếu'))
+        layout.addWidget(QLabel('Xuất: Markdown • Bảng số liệu JSON + Excel (.xlsx) • Khung tên • Chia đoạn cho RAG • Danh sách cần đối chiếu • 🔍 Đối chiếu trực quan với bản vẽ gốc'))
         row = QHBoxLayout()
         self.run = QPushButton('Chuyển đổi cho AI')
         self.run.setObjectName('primary')
@@ -154,6 +156,14 @@ class App(QMainWindow):
         open_button = QPushButton('Mở kết quả')
         open_button.clicked.connect(self.open_result)
         row.addWidget(open_button)
+        self.inspect_button = QPushButton('🔍 Đối chiếu trực quan')
+        self.inspect_button.setToolTip('Mở bản vẽ gốc song song với bảng số liệu: bấm vào ô/dòng để khoanh đỏ đúng vị trí trên bản vẽ')
+        self.inspect_button.setStyleSheet(
+            "QPushButton { background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa; font-weight: 600; } "
+            "QPushButton:hover { background: #ffedd5; }"
+        )
+        self.inspect_button.clicked.connect(self.open_inspector)
+        row.addWidget(self.inspect_button)
         layout.addLayout(row)
         self.progress = QProgressBar()
         self.progress.setTextVisible(False)
@@ -301,6 +311,31 @@ class App(QMainWindow):
         if path.is_dir():
             os.startfile(str(path))
 
+    def open_inspector(self):
+        try:
+            from inspector import InspectorWindow
+        except Exception as exc:
+            QMessageBox.warning(self, 'Đối chiếu trực quan', f'Không khởi động được trình đối chiếu:\n{type(exc).__name__}: {exc}')
+            return
+        if self.inspector is None:
+            self.inspector = InspectorWindow(self)
+        if self.history:
+            folder, source, password = self.history[-1]
+            if self.inspector.result_dir != folder:
+                if self.inspector.load_result(folder, source, password):
+                    return
+            else:
+                self.inspector.show()
+                self.inspector.raise_()
+                self.inspector.activateWindow()
+                return
+        elif self.inspector.result_dir is not None:
+            self.inspector.show()
+            self.inspector.raise_()
+            self.inspector.activateWindow()
+            return
+        self.inspector.choose_result()
+
     def show_license_info(self):
         ok, machine_id = verify_license()
         dlg = LicenseDialog(machine_id, self)
@@ -354,7 +389,7 @@ class App(QMainWindow):
                 warned = sum(bool(p['warnings']) for p in data['pages'])
                 if warned:
                     notices.append(f'{Path(source).name}: {warned} trang cần kiểm tra')
-                self.events.put(('result', markdown, str(target)))
+                self.events.put(('result', markdown, str(target), source, password))
             except Cancelled:
                 break
             except Exception as exc:
@@ -376,6 +411,9 @@ class App(QMainWindow):
                 elif event[0] == 'result':
                     self.latest = event[1]
                     self.result_dir = Path(event[2]).parent
+                    if len(event) >= 5:
+                        tgt = Path(event[2])
+                        self.history.append((tgt if tgt.is_dir() else tgt.parent, event[3], event[4]))
                     preview = self.latest[:150000]
                     if len(self.latest) > 150000:
                         preview += '\n\n[Xem trước rút gọn; file xuất chứa toàn bộ nội dung.]' 
@@ -388,7 +426,8 @@ class App(QMainWindow):
                     self.stop.setEnabled(False)
                     self.password.clear()
                     label = 'Đã dừng' if event[4] else 'Hoàn tất'
-                    self.status.setText(f'{label} • {event[1]} file đã xuất • {len(event[2])} lỗi • {len(event[3])} file cần kiểm tra')
+                    self.status.setText(f'{label} • {event[1]} file đã xuất • {len(event[2])} lỗi • {len(event[3])} file cần kiểm tra'
+                                        + (' • Bấm 🔍 Đối chiếu trực quan để soát bảng trên bản vẽ gốc' if event[1] else ''))
                     if event[2] or event[3]:
                         QMessageBox.warning(self, 'Kết quả chuyển đổi', '\n'.join(event[2]+event[3])[:5000])
         except queue.Empty:
@@ -404,9 +443,24 @@ if __name__ == '__main__':
         app.setWindowIcon(QIcon(str(icon_p)))
     window = App()
     window.show()
+    # --inspect "<thư mục>_Marker" : mở thẳng cửa sổ Đối chiếu trực quan cho kết quả có sẵn
+    inspect_dir = None
+    if '--inspect' in sys.argv:
+        i = sys.argv.index('--inspect')
+        if i + 1 < len(sys.argv):
+            inspect_dir = sys.argv[i + 1]
+            window.history.append((Path(inspect_dir), None, ''))
+            window.open_inspector()
     if '--self-test' in sys.argv:
-        app.processEvents()
-        window.grab().save(sys.argv[-1])
+        import time
+        t0 = time.time()
+        while time.time() - t0 < (1.5 if inspect_dir else 0.1):
+            app.processEvents()
+            time.sleep(0.02)
+        target = window.inspector if (inspect_dir and window.inspector) else window
+        target.grab().save(sys.argv[-1])
+        if window.inspector:
+            window.inspector.close()
         window.close()
     else:
         sys.exit(app.exec())

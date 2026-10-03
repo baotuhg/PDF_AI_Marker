@@ -111,8 +111,11 @@ def open_source(request, session):
     return source, total, selected, input_file
 
 
-def page_record(page_num, method, analysis):
-    """Gói kết quả analyze_page thành bản ghi trang cho du_lieu.json."""
+def page_record(page_num, method, analysis, geom=None):
+    """Gói kết quả analyze_page thành bản ghi trang cho du_lieu.json.
+
+    geom: {"pw", "ph" (điểm PDF), "scale" (base_scale), "rot" (số lần xoay 90° CCW)}
+    — để trình Đối chiếu trực quan quy đổi bbox về đúng vị trí trên trang PDF."""
     md = analysis["markdown"]
     text = re.sub(r"^\|[-: |]+\|$", "", md, flags=re.MULTILINE).replace("|", " ")
     text = re.sub(r"[ \t]+", " ", text).strip()
@@ -122,12 +125,20 @@ def page_record(page_num, method, analysis):
     low_numbers = [x for x in analysis["low_confidence"] if re.search(r"\d", x["text"])]
     if low_numbers:
         warnings.append(f"{len(low_numbers)} số liệu OCR độ tin cậy thấp — xem can_kiem_tra.md.")
-    return {
+    rec = {
         "page": page_num, "method": method, "layout": analysis["layout"],
         "metadata": analysis["metadata"], "text": text, "markdown": md,
         "tables": analysis["tables"], "low_confidence": analysis["low_confidence"],
         "warnings": warnings,
     }
+    if geom:
+        rec["geom"] = geom
+    return rec
+
+
+def _geom(pw, ph, scale, rot=0):
+    return {"pw": round(float(pw), 3), "ph": round(float(ph), 3),
+            "scale": round(float(scale), 6), "rot": int(rot or 0)}
 
 
 def _progress(label, idx, n_pages, t_start, lo=10, hi=90):
@@ -196,7 +207,7 @@ def run_fast_text(request, session):
                 method += f"+ocr_{reason}"
 
             analysis = analyze_page(boxes, image=image, factor=factor, dpi=dpi)
-            rec = page_record(page_num + 1, method, analysis)
+            rec = page_record(page_num + 1, method, analysis, geom=_geom(pw, ph, scale, k))
             if reason:
                 rec["warnings"].append(
                     "Chữ trên trang này được OCR (chữ SHX nét vẽ hoặc ảnh scan) nên KHÔNG có dấu tiếng Việt; "
@@ -271,7 +282,9 @@ def run_rapid_ocr(request, session, vietnamese=False):
                 raw = "\n".join(str(r[1]).strip() for r in res if r and str(r[1]).strip())
                 analysis = {"markdown": raw, "tables": [], "metadata": {}, "low_confidence": [],
                             "layout": "fallback_plain"}
-            pages.append(page_record(page_num + 1, method, analysis))
+            pw, ph = page.get_size()
+            pages.append(page_record(page_num + 1, method, analysis,
+                                     geom=_geom(pw, ph, base_scale(pw, ph), 0)))
             _progress(f"[{tag} 2/3] Quét OCR", idx, n_pages, t0, 5, 92)
     finally:
         doc.close()
@@ -560,7 +573,7 @@ def write_outputs(result, mode, source, total, pages, chunks, total_sec, max_cha
     (result / "noi_dung.txt").write_text(
         "\n\n".join(f"[Trang {p['page']}]\n{p['text']}" for p in pages), encoding="utf-8")
     payload = {
-        "source": source.name, "version": "3.0",
+        "source": source.name, "source_path": str(source), "version": "3.0",
         "engine": ENGINE_NAMES.get(mode, "marker-pdf 2.0.0"), "mode": mode,
         "page_count": len(pages), "source_page_count": total,
         "seconds": total_sec, "pages": pages, "chunks": chunks,

@@ -32,6 +32,17 @@ Trong ngành xây dựng (**AEC**), việc ứng dụng Trí tuệ Nhân tạo (
 
 ## 🚀 CÁC TÍNH NĂNG VƯỢT TRỘI DÀNH CHO KỸ SƯ XÂY DỰNG
 
+### 🆕 0. Đối Chiếu Trực Quan Song Song (Split-Screen Visual Inspector)
+<p align="center">
+  <img src="PDF_AI_Marker_Windows_EXE_Final2/inspector_preview.png" alt="Đối chiếu trực quan - bấm ô bảng, khoanh đỏ đúng vị trí trên bản vẽ gốc" width="850">
+</p>
+
+- Sau khi chuyển đổi, bấm **🔍 Đối chiếu trực quan**: màn hình chia đôi — **bên trái là bản vẽ PDF gốc** (phóng to/thu nhỏ, kéo thả), **bên phải là bảng số liệu AI đã trích xuất**.
+- **Bấm vào bất kỳ ô nào** (hoặc dùng phím mũi tên ↑ ↓ ← →) → phần mềm tự chuyển đúng trang, phóng to và **khoanh khung đỏ nhấp nháy tại đúng vị trí con số đó** trên bản vẽ gốc.
+- Tab **⚠️ Cần đối chiếu**: danh sách chữ/số OCR độ tin cậy thấp hoặc lệch giữa 2 bộ OCR — bấm vào là nhảy tới tận nơi để soát.
+- Tab **📑 Khung tên**: xem nhanh số hiệu, tên bản vẽ, tỷ lệ… của từng trang.
+- Hỗ trợ trang xoay, PDF có mật khẩu, bản vẽ khổ lớn A0/A1. Kỹ sư **nghiệm thu số liệu nhanh gấp nhiều lần** thay vì dò bằng mắt từng bản vẽ.
+
 ### 1. OCR Tiếng Việt Có Dấu Đa Tầng (Multi-Engine AI)
 - Tích hợp mô hình AI thị giác chuyên sâu, nhận diện tiếng Việt có dấu chuẩn xác ngay cả trên bản vẽ scan độ phân giải cao hoặc bản vẽ in lại nhiều lần.
 - Tự động nhận diện và dịch mã font chữ chuyên dụng ngành xây dựng:

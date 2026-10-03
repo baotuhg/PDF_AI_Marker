@@ -22,6 +22,8 @@ a = Analysis(
     hiddenimports=[
         'license_core',
         'license_dialog',
+        'inspector',
+        'PySide6.QtPdf',
         'md_postprocess',
         'marker_bridge',
         'PySide6.QtCore',
