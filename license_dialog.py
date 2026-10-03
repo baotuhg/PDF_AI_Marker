@@ -40,35 +40,73 @@ class LicenseDialog(QDialog):
         from license_core import get_license_status
         st = get_license_status()
         status = st.get("status", "EXPIRED")
+        plan = st.get("plan", "LIFETIME")
+        plan_name = st.get("plan_name", "")
         days_left = st.get("days_left", 0)
+        exp_date = st.get("expire_date", "")
+        customer = st.get("customer", "")
 
         if status == "ACTIVE":
-            title = QLabel("🔑  Bản quyền PDF AI Marker v3 — [ĐÃ KÍCH HOẠT VĨNH VIỄN]")
-            title.setFont(QFont("Segoe UI", 14, QFont.Bold))
-            title.setStyleSheet("color: #1e3a8a;")
-            layout.addWidget(title)
+            if plan == "LIFETIME":
+                title = QLabel("👑  Bản quyền PDF AI Marker v3 — [VĨNH VIỄN 150 NĂM (TRỌN ĐỜI)]")
+                title.setFont(QFont("Segoe UI", 13, QFont.Bold))
+                title.setStyleSheet("color: #1e3a8a;")
+                layout.addWidget(title)
 
-            status_notice = QLabel(
-                "🎉 <b>Phần mềm ĐÃ ĐƯỢC KÍCH HOẠT BẢN QUYỀN THƯƠNG MẠI HỢP LỆ!</b><br>"
-                "Tác giả: <b>Nguyễn Bảo Tú (23HG)</b>  |  Phiên bản: <b>3.0 Commercial</b><br>"
-                "<i>Trạng thái: Hoạt động đầy đủ tính năng. Bạn có thể gia hạn hoặc đổi sang USB nếu cần.</i>"
-            )
-            status_notice.setTextFormat(Qt.RichText)
-            status_notice.setStyleSheet(
-                "background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; "
-                "border-radius: 6px; padding: 10px 14px; font-size: 10pt;"
-            )
-            layout.addWidget(status_notice)
+                status_notice = QLabel(
+                    "🎉 <b>Phần mềm ĐÃ ĐƯỢC KÍCH HOẠT GÓI VĨNH VIỄN (150 NĂM - TRỌN ĐỜI)!</b><br>"
+                    f"Tác giả: <b>Nguyễn Bảo Tú (23HG)</b>  |  Hết hạn: <b>{exp_date}</b> (Còn {days_left} ngày)<br>"
+                    "<i>Trạng thái: Hoạt động vĩnh viễn trọn đời. Bạn có toàn quyền sử dụng tất cả tính năng AI & OCR.</i>"
+                )
+                status_notice.setTextFormat(Qt.RichText)
+                status_notice.setStyleSheet(
+                    "background: #eff6ff; color: #1e40af; border: 1.5px solid #93c5fd; "
+                    "border-radius: 6px; padding: 10px 14px; font-size: 10pt;"
+                )
+                layout.addWidget(status_notice)
+            elif plan == "1_YEAR":
+                title = QLabel(f"⭐  Bản quyền PDF AI Marker v3 — [GÓI 1 NĂM: CÒN {days_left} NGÀY]")
+                title.setFont(QFont("Segoe UI", 13, QFont.Bold))
+                title.setStyleSheet("color: #065f46;")
+                layout.addWidget(title)
+
+                status_notice = QLabel(
+                    f"⭐ <b>Phần mềm ĐANG HOẠT ĐỘNG VỚI GÓI BẢN QUYỀN 1 NĂM (THUÊ BAO HÀNG NĂM)!</b><br>"
+                    f"Tác giả: <b>Nguyễn Bảo Tú (23HG)</b>  |  Khách hàng: <b>{customer or 'Quý khách'}</b><br>"
+                    f"Thời hạn đến ngày: <b>{exp_date}</b> (Còn <b>{days_left}</b> ngày sử dụng). Bạn có thể gia hạn bất kỳ lúc nào."
+                )
+                status_notice.setTextFormat(Qt.RichText)
+                status_notice.setStyleSheet(
+                    "background: #ecfdf5; color: #065f46; border: 1.5px solid #a7f3d0; "
+                    "border-radius: 6px; padding: 10px 14px; font-size: 10pt;"
+                )
+                layout.addWidget(status_notice)
+            else:
+                title = QLabel(f"🔑  Bản quyền PDF AI Marker v3 — [CÒN {days_left} NGÀY]")
+                title.setFont(QFont("Segoe UI", 13, QFont.Bold))
+                title.setStyleSheet("color: #065f46;")
+                layout.addWidget(title)
+
+                status_notice = QLabel(
+                    f"🔑 <b>BẢN QUYỀN THƯƠNG MẠI HỢP LỆ!</b><br>"
+                    f"Tác giả: <b>Nguyễn Bảo Tú (23HG)</b>  |  Hạn dùng: <b>{exp_date}</b> (Còn {days_left} ngày)."
+                )
+                status_notice.setTextFormat(Qt.RichText)
+                status_notice.setStyleSheet(
+                    "background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; "
+                    "border-radius: 6px; padding: 10px 14px; font-size: 10pt;"
+                )
+                layout.addWidget(status_notice)
         elif status == "TRIAL":
-            title = QLabel(f"🎁  Bản quyền PDF AI Marker v3 — [DÙNG THỬ CÒN {days_left} NGÀY]")
-            title.setFont(QFont("Segoe UI", 14, QFont.Bold))
+            title = QLabel(f"🎁  Bản quyền PDF AI Marker v3 — [DÙNG THỬ 1 THÁNG: CÒN {days_left} NGÀY]")
+            title.setFont(QFont("Segoe UI", 13, QFont.Bold))
             title.setStyleSheet("color: #b45309;")
             layout.addWidget(title)
 
             status_notice = QLabel(
-                f"🎁 <b>BẠN ĐANG TRONG THỜI GIAN DÙNG THỬ MIỄN PHÍ ({days_left} ngày còn lại)!</b><br>"
-                "Tác giả: <b>Nguyễn Bảo Tú (23HG)</b>  |  Trải nghiệm đầy đủ 100% tính năng AI và OCR.<br>"
-                "Mã máy (Machine ID) <b>đã tự động được sao chép</b>. Bạn có thể mua key bất kỳ lúc nào để mở khóa vĩnh viễn."
+                f"🎁 <b>BẠN ĐANG TRONG THỜI GIAN DÙNG THỬ MIỄN PHÍ 1 THÁNG ({days_left} ngày còn lại)!</b><br>"
+                "Tác giả: <b>Nguyễn Bảo Tú (23HG)</b>  |  Trải nghiệm đầy đủ 100% tính năng AI và OCR không giới hạn.<br>"
+                "Mã máy (Machine ID) <b>đã tự động được sao chép</b>. Bạn có thể chọn gói <b>1 Năm</b> hoặc <b>Vĩnh viễn (150 Năm)</b> bất cứ lúc nào."
             )
             status_notice.setTextFormat(Qt.RichText)
             status_notice.setStyleSheet(
@@ -78,13 +116,14 @@ class LicenseDialog(QDialog):
             layout.addWidget(status_notice)
         else:
             title = QLabel("🔒  Kích hoạt Bản quyền PDF AI Marker v3")
-            title.setFont(QFont("Segoe UI", 14, QFont.Bold))
+            title.setFont(QFont("Segoe UI", 13, QFont.Bold))
             title.setStyleSheet("color: #991b1b;")
             layout.addWidget(title)
 
             copy_notice = QLabel(
-                "⚠️ <b>Thời hạn dùng thử miễn phí đã kết thúc hoặc máy chưa kích hoạt key!</b><br>"
+                "⚠️ <b>Thời hạn dùng thử 1 tháng đã kết thúc hoặc bản quyền máy đã hết hạn!</b><br>"
                 "Tác giả: <b>Nguyễn Bảo Tú (23HG)</b><br>"
+                "Vui lòng liên hệ tác giả để gia hạn gói <b>1 Năm</b> hoặc nâng cấp gói <b>Vĩnh viễn (150 Năm)</b>.<br>"
                 "Mã máy (Machine ID) <b>đã tự động được sao chép vào Clipboard</b>. Mở Zalo/Email ấn <b>Ctrl + V</b> để gửi mã đăng ký key."
             )
             copy_notice.setTextFormat(Qt.RichText)

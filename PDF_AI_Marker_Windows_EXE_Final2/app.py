@@ -219,15 +219,31 @@ class App(QMainWindow):
         from license_core import get_license_status
         st = get_license_status()
         status = st.get("status", "EXPIRED")
+        plan = st.get("plan", "LIFETIME")
         days_left = st.get("days_left", 0)
 
         if status == "ACTIVE":
-            self.btn_license.setText("🔑 Bản quyền: [ĐÃ KÍCH HOẠT VĨNH VIỄN]")
-            self.btn_license.setStyleSheet(
-                "QPushButton { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; "
-                "font-weight: 600; padding: 7px 16px; border-radius: 6px; font-size: 10.5pt; } "
-                "QPushButton:hover { background: #d1fae5; color: #064e3b; }"
-            )
+            if plan == "LIFETIME":
+                self.btn_license.setText("👑 Bản quyền: [VĨNH VIỄN 150 NĂM]")
+                self.btn_license.setStyleSheet(
+                    "QPushButton { background: #eff6ff; color: #1e3a8a; border: 1.5px solid #93c5fd; "
+                    "font-weight: 700; padding: 7px 16px; border-radius: 6px; font-size: 10.5pt; } "
+                    "QPushButton:hover { background: #dbeafe; color: #172554; }"
+                )
+            elif plan == "1_YEAR":
+                self.btn_license.setText(f"⭐ Bản quyền 1 Năm: [CÒN {days_left} NGÀY]")
+                self.btn_license.setStyleSheet(
+                    "QPushButton { background: #ecfdf5; color: #065f46; border: 1.5px solid #a7f3d0; "
+                    "font-weight: 700; padding: 7px 16px; border-radius: 6px; font-size: 10.5pt; } "
+                    "QPushButton:hover { background: #d1fae5; color: #064e3b; }"
+                )
+            else:
+                self.btn_license.setText(f"🔑 Bản quyền: [CÒN {days_left} NGÀY]")
+                self.btn_license.setStyleSheet(
+                    "QPushButton { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; "
+                    "font-weight: 600; padding: 7px 16px; border-radius: 6px; font-size: 10.5pt; } "
+                    "QPushButton:hover { background: #d1fae5; color: #064e3b; }"
+                )
         elif status == "TRIAL":
             self.btn_license.setText(f"🎁 Dùng thử: [CÒN {days_left} NGÀY] — Kích hoạt")
             self.btn_license.setStyleSheet(
@@ -236,7 +252,7 @@ class App(QMainWindow):
                 "QPushButton:hover { background: #fef3c7; color: #78350f; }"
             )
         else:
-            self.btn_license.setText("🔒 HẾT HẠN DÙNG THỬ — Nhập key")
+            self.btn_license.setText("🔒 HẾT HẠN BẢN QUYỀN — Nhập key")
             self.btn_license.setStyleSheet(
                 "QPushButton { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; "
                 "font-weight: 600; padding: 7px 16px; border-radius: 6px; font-size: 10.5pt; } "

@@ -2,24 +2,11 @@
  * GOOGLE APPS SCRIPT — MÁY CHỦ BẢN QUYỀN ĐÁM MÂY (CLOUD LICENSE SERVER)
  * Dự án: PDF AI Marker v3
  * Tác giả: Nguyễn Bảo Tú (23HG)
- * 
- * HƯỚNG DẪN 3 BƯỚC TRIỂN KHAI (HOÀN TOÀN MIỄN PHÍ TRÊN GOOGLE):
- * 1. Mở https://sheets.new để tạo một trang tính Google Sheets mới (Đặt tên: "PDF_AI_Marker_Licenses").
- * 2. Trên thanh menu, chọn: Tiện ích mở rộng (Extensions) > Apps Script.
- * 3. Xóa hết mã cũ trong cửa sổ soạn thảo, dán toàn bộ đoạn mã này vào rồi bấm Lưu (Ctrl + S).
- * 4. Bấm "Triển khai" (Deploy) > "Tùy chọn triển khai mới" (New deployment):
- *    - Loại: Chọn biểu tượng bánh răng ⚙️ > "Ứng dụng web" (Web app).
- *    - Mô tả: "PDF AI Marker Cloud Server v3"
- *    - Thực thi dưới dạng (Execute as): "Tôi" (Me).
- *    - Người có quyền truy cập (Who has access): "Bất kỳ ai" (Anyone).  <-- CỰC KỲ QUAN TRỌNG!
- * 5. Bấm "Triển khai" > Cấp quyền truy cập cho tài khoản Google của bạn.
- * 6. Copy đường link "URL ứng dụng web" (dạng https://script.google.com/macros/s/AKfy.../exec)
- *    và dán vào file "cloud_config.json" cạnh file phần mềm của bạn.
+ * Hỗ trợ 3 gói: 1 Năm (Subscription), Dùng thử 1 Tháng (30 Ngày), Vĩnh viễn (150 Năm - Trọn đời)
  */
 
 const SHEET_NAME = "Licenses";
 
-// Hàm xử lý yêu cầu GET từ phần mềm gửi lên
 function doGet(e) {
   try {
     const params = e ? e.parameter : {};
@@ -34,26 +21,39 @@ function doGet(e) {
       });
     }
 
-    // Tách danh sách machine_id (khách có thể gửi cả Pure HW ID và Legacy ID)
     const queryIds = rawIds.split(",").map(id => id.trim().toUpperCase()).filter(id => id.length > 0);
-
     const sheet = getOrCreateSheet();
     const data = sheet.getDataRange().getValues();
+    const nowUtc = new Date().toISOString();
 
-    // Duyệt từ hàng thứ 2 (bỏ qua hàng tiêu đề)
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
       const rowMachineId = String(row[1] || "").trim().toUpperCase();
       const rowCustomer = String(row[2] || "").trim();
-      const rowKey = String(row[4] || "").trim().toUpperCase();
-      const rowStatus = String(row[5] || "").trim().toUpperCase();
+      const rowPhone = String(row[3] || "").trim();
 
-      if (!rowMachineId) continue;
+      // Nhận diện tự động cột Key (tương thích cả bảng 7 cột cũ và 9 cột mới)
+      let rowPlan = "LIFETIME";
+      let rowExpireDate = "2176-12-31";
+      let rowKey = "";
+      let rowStatus = "ACTIVE";
 
-      // Kiểm tra xem machine_id có khớp với bất kỳ ID nào trong danh sách truy vấn không
+      if (String(row[4] || "").length > 80) {
+        // Cấu trúc cũ: Col E = Key, Col F = Status
+        rowKey = String(row[4] || "").trim().toUpperCase();
+        rowStatus = String(row[5] || "ACTIVE").trim().toUpperCase();
+      } else {
+        // Cấu trúc mới: Col E = Plan, Col F = Expire Date, Col G = Key, Col H = Status
+        rowPlan = String(row[4] || "LIFETIME").trim().toUpperCase();
+        rowExpireDate = String(row[5] || "2176-12-31").trim();
+        rowKey = String(row[6] || "").trim().toUpperCase();
+        rowStatus = String(row[7] || "ACTIVE").trim().toUpperCase();
+      }
+
+      if (!rowMachineId || !rowKey) continue;
+
       for (const qId of queryIds) {
         if (rowMachineId === qId || rowMachineId.includes(qId) || qId.includes(rowMachineId)) {
-          // Kiểm tra trạng thái kích hoạt
           if (rowStatus === "BLOCKED" || rowStatus === "KHOA" || rowStatus === "DISABLED") {
             return jsonResponse({
               status: "blocked",
@@ -63,25 +63,47 @@ function doGet(e) {
             });
           }
 
-          // Kích hoạt hợp lệ
+          // Kiểm tra xem đã quá ngày hết hạn chưa
+          if (rowExpireDate && rowExpireDate !== "LIFETIME") {
+            const expDate = new Date(rowExpireDate);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            if (expDate < today) {
+              return jsonResponse({
+                status: "expired",
+                found: true,
+                active: false,
+                target_id: rowMachineId,
+                plan: rowPlan,
+                expire_date: rowExpireDate,
+                customer: rowCustomer,
+                server_time: nowUtc,
+                message: "Bản quyền gói " + rowPlan + " đã hết hạn vào ngày " + rowExpireDate + ". Vui lòng gia hạn."
+              });
+            }
+          }
+
           return jsonResponse({
             status: "success",
             found: true,
             active: true,
             target_id: rowMachineId,
             key: rowKey,
-            customer: rowCustomer || "Khách hàng thân thiết",
+            plan: rowPlan,
+            expire_date: rowExpireDate,
+            customer: rowCustomer || "Quý khách",
+            server_time: nowUtc,
             message: "Xác thực bản quyền thành công."
           });
         }
       }
     }
 
-    // Không tìm thấy trong bảng
     return jsonResponse({
       status: "not_found",
       found: false,
       active: false,
+      server_time: nowUtc,
       message: "Mã máy tính chưa được đăng ký trong danh sách bản quyền của tác giả."
     });
 
@@ -94,7 +116,6 @@ function doGet(e) {
   }
 }
 
-// Xử lý POST (Dùng khi bạn muốn gọi API tự động thêm key từ hệ thống bán hàng)
 function doPost(e) {
   try {
     const postData = JSON.parse(e.postData.contents);
@@ -105,6 +126,8 @@ function doPost(e) {
       const machineId = String(postData.machine_id || "").trim().toUpperCase();
       const customer = String(postData.customer || "").trim();
       const phone = String(postData.phone || "").trim();
+      const plan = String(postData.plan || "LIFETIME").trim().toUpperCase();
+      const expireDate = String(postData.expire_date || "2176-12-31").trim();
       const key = String(postData.key || "").trim().toUpperCase();
       const notes = String(postData.notes || "").trim();
 
@@ -112,7 +135,7 @@ function doPost(e) {
         return jsonResponse({ status: "error", message: "machine_id và key không được để trống" });
       }
 
-      sheet.appendRow([new Date(), machineId, customer, phone, key, "ACTIVE", notes]);
+      sheet.appendRow([new Date(), machineId, customer, phone, plan, expireDate, key, "ACTIVE", notes]);
       return jsonResponse({ status: "success", message: "Đã thêm bản quyền thành công!" });
     }
 
@@ -122,7 +145,6 @@ function doPost(e) {
   }
 }
 
-// Tạo bảng và hàng tiêu đề chuẩn nếu sheet chưa có
 function getOrCreateSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(SHEET_NAME);
@@ -130,13 +152,14 @@ function getOrCreateSheet() {
     sheet = ss.insertSheet(SHEET_NAME);
   }
 
-  // Nếu sheet rỗng, chèn tiêu đề chuẩn
   if (sheet.getLastRowNum() === 0) {
     const headers = [
       "Thời gian tạo",
       "Mã máy tính (Machine ID)",
       "Tên khách hàng",
       "Số điện thoại / Zalo",
+      "Gói bản quyền (1_YEAR / LIFETIME / TRIAL)",
+      "Ngày hết hạn (YYYY-MM-DD)",
       "License Key (RSA)",
       "Trạng thái (ACTIVE / BLOCKED)",
       "Ghi chú"
@@ -152,21 +175,19 @@ function getOrCreateSheet() {
   return sheet;
 }
 
-// Hàm bổ trợ trả về JSON chuẩn
 function jsonResponse(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// Thêm menu tiện ích vào giao diện Google Sheets của bạn
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu("🔑 Quản lý Bản quyền PDF AI")
-    .addItem("Khởi tạo cấu trúc bảng chuẩn", "setupSheetLayout")
+    .addItem("Khởi tạo cấu trúc bảng chuẩn (3 Gói)", "setupSheetLayout")
     .addToUi();
 }
 
 function setupSheetLayout() {
   getOrCreateSheet();
-  SpreadsheetApp.getUi().alert("Đã khởi tạo thành công cấu trúc bảng bản quyền!");
+  SpreadsheetApp.getUi().alert("Đã khởi tạo thành công cấu trúc bảng bản quyền 3 gói (1 Năm, Dùng thử 1 Tháng, Vĩnh viễn 150 Năm)!");
 }

@@ -49,15 +49,18 @@ Giải quyết triệt để bài toán: **Khách hàng cài lại Windows, Form
 
 ---
 
-## 📊 Cách thêm khách hàng vào hệ thống
-Trong bảng tính Google Sheet của bạn, chỉ cần điền thông tin vào các cột:
-1. **Thời gian:** Ngày khách mua.
-2. **Mã máy tính (Machine ID):** Dán mã máy của khách (hoặc chuỗi mã 32 ký tự).
-3. **Tên khách hàng:** Họ và tên khách hàng (ví dụ: *Nguyễn Văn A - Công ty XYZ*).
-4. **Số điện thoại / Zalo:** Để tiện chăm sóc khách hàng.
-5. **License Key (RSA):** Key được sinh ra từ file `keygen.py`.
-6. **Trạng thái:** Điền **`ACTIVE`** (Mặc định).
+## 📊 Cách thêm khách hàng vào hệ thống (Hỗ trợ 3 Gói)
+Khi chạy `python keygen.py`, công cụ sẽ in sẵn 1 dòng dữ liệu dạng bảng. Bạn chỉ cần **copy dòng đó dán thẳng vào Google Sheet**, các cột sẽ tự động nhảy vào đúng vị trí:
+1. **Thời gian tạo:** Ngày giờ cấp key.
+2. **Mã máy tính (Machine ID):** Mã máy khách gửi (hoặc mã USB).
+3. **Tên khách hàng:** Họ tên khách (để hiển thị lời chào trên app).
+4. **Số điện thoại / Zalo:** Liên hệ chăm sóc khách hàng.
+5. **Gói bản quyền:** Điền `1_YEAR` (Gói 1 Năm), `LIFETIME` (Vĩnh viễn 150 Năm) hoặc `TRIAL_30D` (Dùng thử 1 Tháng).
+6. **Ngày hết hạn:** Định dạng `YYYY-MM-DD` (ví dụ `2027-10-03` hoặc `2176-10-03`).
+7. **License Key (RSA):** Key được sinh ra từ `keygen.py`.
+8. **Trạng thái:** Điền **`ACTIVE`** (Mặc định).
    - *Mẹo hay:* Nếu khách bùng tiền hoặc muốn thu hồi bản quyền, bạn chỉ cần sửa cột này thành **`BLOCKED`** $\rightarrow$ Phần mềm trên máy khách sẽ tự động bị khóa!
+9. **Ghi chú:** Ghi chú thêm (dự án, thỏa thuận...).
 
 ---
 

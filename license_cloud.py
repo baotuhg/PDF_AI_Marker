@@ -129,6 +129,8 @@ def query_cloud_license(machine_ids: list[str]) -> dict:
                 "active": active,
                 "target_id": data.get("target_id", clean_ids[0]).strip().upper(),
                 "key": data.get("key", "").strip().upper(),
+                "plan": data.get("plan", "LIFETIME").strip().upper(),
+                "expire_date": data.get("expire_date", "2176-12-31").strip(),
                 "customer": data.get("customer", "Quý khách"),
                 "message": data.get("message", "Đã tra cứu thành công.")
             }
@@ -160,6 +162,8 @@ def recover_license_from_cloud(candidate_ids: list[str]) -> tuple[bool, str, dic
     target_id = res.get("target_id", "")
     key = res.get("key", "")
     customer = res.get("customer", "Quý khách")
+    plan = res.get("plan", "LIFETIME")
+    expire_date = res.get("expire_date", "2176-12-31")
 
     if not target_id or not key:
         return False, "Máy chủ không trả về thông tin Key hợp lệ.", {}
@@ -168,14 +172,21 @@ def recover_license_from_cloud(candidate_ids: list[str]) -> tuple[bool, str, dic
     from license_core import _verify_sig, save_license
 
     # BẢO MẬT TUYỆT ĐỐI: Phải kiểm tra chữ ký RSA-1024 cục bộ
-    # Dù server có bị hack hay trả bậy thì Public Key RSA cục bộ sẽ chặn ngay lập tức
-    if not _verify_sig(target_id, key):
+    if not _verify_sig(target_id, key, expire_date):
         return False, "Chữ ký số RSA nhận từ máy chủ không hợp lệ!", {}
 
-    # Chữ ký chuẩn xác -> Tự động lưu và kích hoạt vĩnh viễn trên máy tính
-    ok = save_license(target_id, key, "MACHINE")
+    # Chữ ký chuẩn xác -> Tự động lưu và kích hoạt trên máy tính
+    ok = save_license(target_id, key, "MACHINE", expire_date=expire_date, plan=plan, customer=customer)
     if ok:
-        msg = f"Chào mừng {customer}! Bản quyền vĩnh viễn đã được tự động khôi phục từ hệ thống đám mây."
-        return True, msg, {"target_id": target_id, "key": key, "customer": customer}
+        plan_desc = "Vĩnh viễn (150 Năm - Trọn đời)" if plan == "LIFETIME" else ("1 Năm" if plan == "1_YEAR" else "Dùng thử 1 Tháng")
+        msg = f"Chào mừng {customer}! Bản quyền gói {plan_desc} đã được tự động khôi phục từ hệ thống đám mây."
+        return True, msg, {
+            "target_id": target_id,
+            "key": key,
+            "customer": customer,
+            "plan": plan,
+            "expire_date": expire_date
+        }
     else:
         return False, "Không thể ghi dữ liệu bản quyền vào hệ thống máy tính.", {}
+

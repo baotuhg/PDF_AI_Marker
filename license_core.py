@@ -157,7 +157,7 @@ def get_connected_usb_serials() -> list[str]:
     return serials
 
 
-def _verify_sig(target_id: str, sig_str: str) -> bool:
+def _verify_sig(target_id: str, sig_str: str, expire_date: str = "") -> bool:
     """Xác minh chữ ký số RSA-1024 với Public Key (Pure Python)."""
     try:
         clean_sig = sig_str.strip().upper().replace(" ", "").replace("\n", "").replace("\r", "")
@@ -165,15 +165,89 @@ def _verify_sig(target_id: str, sig_str: str) -> bool:
         sig_bytes = base64.b32decode(clean_sig + padding)
         sig_int = int.from_bytes(sig_bytes, "big")
 
-        # Xác minh: (sig ^ E) mod N == Hash(Target_ID)
         h_actual = pow(sig_int, _RSA_E, _RSA_N)
+        tid = target_id.strip().upper()
 
-        payload = f"PDF_AI_v3:{target_id.strip().upper()}".encode("utf-8")
-        h_expected = int.from_bytes(hashlib.sha256(payload).digest(), "big")
+        # 1. Thử xác minh theo payload có ngày hết hạn
+        if expire_date:
+            payload = f"PDF_AI_v3:{tid}:{expire_date.strip()}".encode("utf-8")
+            if h_actual == int.from_bytes(hashlib.sha256(payload).digest(), "big"):
+                return True
 
-        return h_actual == h_expected
+        # 2. Thử xác minh Legacy (Không có ngày -> Tự động là Vĩnh viễn 150 Năm)
+        payload_legacy = f"PDF_AI_v3:{tid}".encode("utf-8")
+        if h_actual == int.from_bytes(hashlib.sha256(payload_legacy).digest(), "big"):
+            return True
+
+        return False
     except Exception:
         return False
+
+
+def _resolve_license_validity(target_id: str, sig_str: str, declared_exp: str = "") -> tuple[bool, str, str, int, str]:
+    """
+    Xác thực chữ ký số RSA và tính toán thời hạn, gói bản quyền (1 Năm, 150 Năm Vĩnh Viễn, Dùng thử 1 Tháng).
+    Trả về: (is_valid: bool, plan_code: str, expire_date: str, days_left: int, message: str)
+    """
+    try:
+        clean_sig = sig_str.strip().upper().replace(" ", "").replace("\n", "").replace("\r", "")
+        padding = "=" * (-len(clean_sig) % 8)
+        sig_bytes = base64.b32decode(clean_sig + padding)
+        sig_int = int.from_bytes(sig_bytes, "big")
+
+        h_actual = pow(sig_int, _RSA_E, _RSA_N)
+        tid = target_id.strip().upper()
+        now = datetime.datetime.now(datetime.timezone.utc)
+        today = now.date()
+
+        matched_exp = ""
+        is_matched = False
+        is_legacy = False
+
+        # 1. Thử với declared_exp nếu có
+        if declared_exp:
+            exp_str = declared_exp.strip()
+            payload = f"PDF_AI_v3:{tid}:{exp_str}".encode("utf-8")
+            if h_actual == int.from_bytes(hashlib.sha256(payload).digest(), "big"):
+                is_matched = True
+                matched_exp = exp_str
+
+        # 2. Thử với legacy payload (Không có ngày -> Tự động là Vĩnh viễn 150 năm)
+        if not is_matched:
+            payload_legacy = f"PDF_AI_v3:{tid}".encode("utf-8")
+            if h_actual == int.from_bytes(hashlib.sha256(payload_legacy).digest(), "big"):
+                is_matched = True
+                is_legacy = True
+                matched_exp = "2176-12-31"
+
+        if not is_matched:
+            return False, "INVALID", "", 0, "Chữ ký bản quyền không hợp lệ hoặc sai mã máy."
+
+        # Xử lý ngày hết hạn
+        if is_legacy:
+            days_left = 150 * 365
+            return True, "LIFETIME", matched_exp, days_left, "Bản quyền Vĩnh viễn hợp lệ (Thời hạn 150 Năm - Trọn đời)"
+
+        try:
+            exp_date = datetime.date.fromisoformat(matched_exp)
+        except Exception:
+            exp_date = today + datetime.timedelta(days=365)
+
+        days_left = (exp_date - today).days
+
+        if days_left <= 0:
+            return False, "EXPIRED", matched_exp, 0, f"Bản quyền đã hết hạn vào ngày {exp_date.strftime('%d/%m/%Y')}. Vui lòng gia hạn."
+
+        if days_left > 36500:
+            return True, "LIFETIME", matched_exp, days_left, "Bản quyền Vĩnh viễn hợp lệ (Thời hạn 150 Năm - Trọn đời)"
+        elif days_left > 35:
+            return True, "1_YEAR", matched_exp, days_left, f"Bản quyền 1 Năm hợp lệ (Còn {days_left} ngày, hết hạn: {exp_date.strftime('%d/%m/%Y')})"
+        else:
+            return True, "TRIAL_30D", matched_exp, days_left, f"Bản quyền còn {days_left} ngày (hết hạn: {exp_date.strftime('%d/%m/%Y')})"
+
+    except Exception as e:
+        return False, "ERROR", "", 0, f"Lỗi xác thực: {e}"
+
 
 
 try:
@@ -277,19 +351,93 @@ def _sign_trial(machine_id: str, start_iso: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+_TIME_ANCHOR_FILE = ".time_anchor"
+
+
+def _read_time_anchor() -> str:
+    """Đọc mốc thời gian hệ thống lớn nhất từng ghi nhận."""
+    if winreg and sys.platform == "win32":
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REG_PATH, 0, winreg.KEY_READ) as k:
+                val, _ = winreg.QueryValueEx(k, "ClockAnchor")
+                if val:
+                    return val
+        except Exception:
+            pass
+    p = _get_trial_dir() / _TIME_ANCHOR_FILE
+    if p.exists():
+        try:
+            return p.read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
+    return ""
+
+
+def _update_time_anchor(dt: datetime.datetime):
+    """Cập nhật mốc thời gian lớn nhất vào Registry và File ẩn."""
+    iso_val = dt.isoformat()
+    if winreg and sys.platform == "win32":
+        try:
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _REG_PATH) as k:
+                winreg.SetValueEx(k, "ClockAnchor", 0, winreg.REG_SZ, iso_val)
+        except Exception:
+            pass
+    try:
+        p = _get_trial_dir() / _TIME_ANCHOR_FILE
+        p.write_text(iso_val, encoding="utf-8")
+        if sys.platform == "win32":
+            ctypes.windll.kernel32.SetFileAttributesW(str(p), 2)
+    except Exception:
+        pass
+
+
+def _check_clock_tampering(now: datetime.datetime) -> tuple[bool, str]:
+    """Kiểm tra xem người dùng có chỉnh lùi đồng hồ Windows không."""
+    anchor = _read_time_anchor()
+    if anchor:
+        try:
+            anchor_dt = datetime.datetime.fromisoformat(anchor)
+            if (anchor_dt - now).total_seconds() > 7200:
+                return True, "Phát hiện thời gian hệ thống bị chỉnh lùi để gian lận bản quyền! Vui lòng chỉnh lại ngày giờ chuẩn."
+        except Exception:
+            pass
+    _update_time_anchor(now)
+    return False, ""
+
+
 def get_license_status() -> dict:
     """
     Trả về trạng thái bản quyền chi tiết:
     {
        "ok": bool,            # True nếu được phép chạy (Bản quyền thật HOẶC Dùng thử hợp lệ)
        "status": str,         # "ACTIVE" | "TRIAL" | "EXPIRED"
+       "plan": str,           # "LIFETIME" | "1_YEAR" | "TRIAL_30D" | "EXPIRED"
+       "plan_name": str,      # Tên gói hiển thị
        "machine_id": str,     # Mã máy
-       "message": str,        # Thông báo trạng thái
-       "days_left": int       # Số ngày dùng thử còn lại
+       "expire_date": str,    # Ngày hết hạn (YYYY-MM-DD)
+       "message": str,        # Thông báo trạng thái chi tiết
+       "days_left": int,      # Số ngày sử dụng còn lại
+       "customer": str        # Tên khách hàng (nếu có)
     }
     """
+    now = datetime.datetime.now(datetime.timezone.utc)
     machine_id = _get_machine_id()
     local_lic_path = _license_path()
+
+    # 0. Kiểm tra chống gian lận lùi đồng hồ hệ thống
+    tampered, tamper_msg = _check_clock_tampering(now)
+    if tampered:
+        return {
+            "ok": False,
+            "status": "EXPIRED",
+            "plan": "EXPIRED",
+            "plan_name": "Lỗi đồng hồ hệ thống",
+            "machine_id": machine_id,
+            "expire_date": "",
+            "message": tamper_msg,
+            "days_left": 0,
+            "customer": ""
+        }
 
     # 1. Thu thập tất cả các nguồn license tiềm năng trên máy tính
     candidate_sources: list[tuple[dict, str]] = []
@@ -301,7 +449,7 @@ def get_license_status() -> dict:
         except Exception:
             pass
 
-    # b. Các thư mục hệ thống bền vững (AppData, Home)
+    # b. Các thư mục hệ thống bền vững (AppData, Home, Phân vùng phụ D:, E:...)
     for p in _get_persistent_license_paths():
         if p.exists():
             try:
@@ -322,23 +470,36 @@ def get_license_status() -> dict:
             lic_type = data.get("type", "MACHINE")
             target_id = data.get("target_id", "").strip().upper()
             key = data.get("key", "").strip().upper()
+            declared_exp = data.get("expire_date", "").strip()
+            customer = data.get("customer", "")
 
             is_valid = False
+            plan_code = "LIFETIME"
+            exp_date_str = "2176-12-31"
+            days_left = 54750
             msg = ""
 
-            if lic_type == "MACHINE" and (target_id in candidate_ids) and _verify_sig(target_id, key):
-                is_valid = True
-                msg = "Bản quyền thương mại hợp lệ (Khóa theo máy SSD)"
-                machine_id = target_id
+            if lic_type == "MACHINE" and (target_id in candidate_ids):
+                valid, plan_code, exp_date_str, days_left, msg = _resolve_license_validity(target_id, key, declared_exp)
+                if valid:
+                    is_valid = True
+                    machine_id = target_id
             elif lic_type == "USB":
                 connected_usbs = get_connected_usb_serials()
                 if any(target_id in usb_sn or usb_sn in target_id for usb_sn in connected_usbs):
-                    if _verify_sig(target_id, key):
+                    valid, plan_code, exp_date_str, days_left, msg = _resolve_license_validity(target_id, key, declared_exp)
+                    if valid:
                         is_valid = True
-                        msg = "Bản quyền thương mại hợp lệ (Khóa theo USB Dongle)"
 
             if is_valid:
                 # ĐÃ TÌM THẤY BẢN QUYỀN HỢP LỆ THEO MÁY!
+                plan_names = {
+                    "LIFETIME": "Bản quyền Vĩnh viễn (150 Năm - Trọn đời)",
+                    "1_YEAR": "Bản quyền 1 Năm",
+                    "TRIAL_30D": "Dùng thử 1 Tháng (30 Ngày)"
+                }
+                plan_name = plan_names.get(plan_code, f"Bản quyền {plan_code}")
+
                 # 1. Khôi phục lại file pdf_ai.lic vào thư mục app hiện tại nếu chưa có
                 if not local_lic_path.exists():
                     try:
@@ -364,9 +525,13 @@ def get_license_status() -> dict:
                 return {
                     "ok": True,
                     "status": "ACTIVE",
+                    "plan": plan_code,
+                    "plan_name": plan_name,
                     "machine_id": machine_id,
+                    "expire_date": exp_date_str,
                     "message": msg,
-                    "days_left": 9999
+                    "days_left": days_left,
+                    "customer": customer
                 }
         except Exception:
             continue
@@ -376,19 +541,26 @@ def get_license_status() -> dict:
         from license_cloud import recover_license_from_cloud
         ok_cloud, msg_cloud, lic_info = recover_license_from_cloud(candidate_ids)
         if ok_cloud:
+            p_code = lic_info.get("plan", "LIFETIME")
+            p_exp = lic_info.get("expire_date", "2176-12-31")
+            p_cust = lic_info.get("customer", "")
+            d_left = 54750 if p_code == "LIFETIME" else 365
             return {
                 "ok": True,
                 "status": "ACTIVE",
+                "plan": p_code,
+                "plan_name": "Bản quyền Vĩnh viễn (150 Năm - Trọn đời)" if p_code == "LIFETIME" else ("Bản quyền 1 Năm" if p_code == "1_YEAR" else "Dùng thử 1 Tháng"),
                 "machine_id": lic_info.get("target_id", machine_id),
+                "expire_date": p_exp,
                 "message": msg_cloud,
-                "days_left": 9999
+                "days_left": d_left,
+                "customer": p_cust
             }
     except Exception:
         pass
 
-    # 2. Cơ chế DÙNG THỬ TỰ ĐỘNG (Auto-Trial 3 ngày từ lần chạy đầu)
+    # 2. Cơ chế DÙNG THỬ TỰ ĐỘNG 1 THÁNG (30 ngày từ lần chạy đầu)
     trial_file = _get_trial_dir() / _TRIAL_FILE
-    now = datetime.datetime.now(datetime.timezone.utc)
 
     if not trial_file.exists():
         start_iso = now.isoformat()
@@ -397,7 +569,7 @@ def get_license_status() -> dict:
             "machine_id": machine_id,
             "start": start_iso,
             "sig": sig,
-            "trial_days": 3
+            "trial_days": 30
         }
         try:
             trial_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -405,12 +577,17 @@ def get_license_status() -> dict:
                 ctypes.windll.kernel32.SetFileAttributesW(str(trial_file), 2)
         except Exception:
             pass
+        exp_date_str = (now.date() + datetime.timedelta(days=30)).strftime("%Y-%m-%d")
         return {
             "ok": True,
             "status": "TRIAL",
+            "plan": "TRIAL_30D",
+            "plan_name": "Dùng thử miễn phí 1 Tháng (30 Ngày)",
             "machine_id": machine_id,
-            "message": "Đang trong thời gian DÙNG THỬ MIỄN PHÍ (Còn 3 ngày)",
-            "days_left": 3
+            "expire_date": exp_date_str,
+            "message": "Đang trong thời gian DÙNG THỬ MIỄN PHÍ 1 THÁNG (Còn 30 ngày)",
+            "days_left": 30,
+            "customer": ""
         }
 
     try:
@@ -423,69 +600,82 @@ def get_license_status() -> dict:
             return {
                 "ok": False,
                 "status": "EXPIRED",
+                "plan": "EXPIRED",
+                "plan_name": "Hết hạn",
                 "machine_id": machine_id,
-                "message": "Dữ liệu dùng thử không hợp lệ. Vui lòng kích hoạt bản quyền.",
-                "days_left": 0
+                "expire_date": "",
+                "message": "Dữ liệu dùng thử không hợp lệ. Vui lòng kích hoạt gói 1 Năm hoặc Vĩnh viễn (150 Năm).",
+                "days_left": 0,
+                "customer": ""
             }
 
         start_dt = datetime.datetime.fromisoformat(t_start)
         elapsed_sec = (now - start_dt).total_seconds()
 
-        if elapsed_sec < -3600:
-            return {
-                "ok": False,
-                "status": "EXPIRED",
-                "machine_id": machine_id,
-                "message": "Phát hiện thời gian hệ thống bị thay đổi. Vui lòng kích hoạt bản quyền.",
-                "days_left": 0
-            }
-
-        trial_duration = 3 * 86400
+        trial_duration = 30 * 86400  # 30 ngày = 1 tháng
         if elapsed_sec < trial_duration:
             remain_sec = trial_duration - elapsed_sec
             days_left = max(1, int(remain_sec // 86400) + (1 if remain_sec % 86400 > 0 else 0))
+            exp_date_str = (start_dt.date() + datetime.timedelta(days=30)).strftime("%Y-%m-%d")
             return {
                 "ok": True,
                 "status": "TRIAL",
+                "plan": "TRIAL_30D",
+                "plan_name": "Dùng thử miễn phí 1 Tháng (30 Ngày)",
                 "machine_id": machine_id,
-                "message": f"Dùng thử miễn phí còn {days_left} ngày",
-                "days_left": days_left
+                "expire_date": exp_date_str,
+                "message": f"Dùng thử miễn phí còn {days_left} ngày (Hết hạn: {exp_date_str})",
+                "days_left": days_left,
+                "customer": ""
             }
         else:
             return {
                 "ok": False,
                 "status": "EXPIRED",
+                "plan": "EXPIRED",
+                "plan_name": "Đã hết hạn dùng thử",
                 "machine_id": machine_id,
-                "message": "Đã hết thời hạn dùng thử 3 ngày. Vui lòng mua bản quyền để tiếp tục.",
-                "days_left": 0
+                "expire_date": "",
+                "message": "Đã hết thời hạn dùng thử miễn phí 1 tháng (30 ngày). Vui lòng nâng cấp bản quyền 1 Năm hoặc Vĩnh viễn (150 năm) để tiếp tục.",
+                "days_left": 0,
+                "customer": ""
             }
     except Exception:
         return {
             "ok": False,
             "status": "EXPIRED",
+            "plan": "EXPIRED",
+            "plan_name": "Hết hạn",
             "machine_id": machine_id,
+            "expire_date": "",
             "message": "Hết hạn dùng thử. Vui lòng mua bản quyền.",
-            "days_left": 0
+            "days_left": 0,
+            "customer": ""
         }
 
 
 def verify_license() -> tuple[bool, str]:
     """
-    Kiểm tra bản quyền hợp lệ (bao gồm cả Bản quyền thật và Dùng thử Auto-Trial).
+    Kiểm tra bản quyền hợp lệ (bao gồm cả Bản quyền thật và Dùng thử Auto-Trial 30 ngày).
     """
     st = get_license_status()
     return st["ok"], st["machine_id"]
 
 
-def save_license(target_id: str, key: str, lic_type: str = "MACHINE") -> bool:
+def save_license(target_id: str, key: str, lic_type: str = "MACHINE",
+                 expire_date: str = "", plan: str = "", customer: str = "") -> bool:
     """Lưu license vào tất cả các vị trí bền vững trên máy tính sau khi kiểm tra chữ ký RSA hợp lệ."""
-    if not _verify_sig(target_id, key):
+    valid, res_plan, res_exp, days_left, msg = _resolve_license_validity(target_id, key, expire_date)
+    if not valid:
         return False
 
     payload = {
         "type": lic_type,
         "target_id": target_id.strip().upper(),
         "key": key.strip().upper(),
+        "plan": plan or res_plan,
+        "expire_date": res_exp,
+        "customer": customer or "",
         "version": "3.0"
     }
     json_str = json.dumps(payload, ensure_ascii=False, indent=2)
@@ -525,6 +715,10 @@ def import_license_file(src_path: str) -> bool:
         target_id = content.get("target_id", "")
         key = content.get("key", "")
         lic_type = content.get("type", "MACHINE")
-        return save_license(target_id, key, lic_type)
+        expire_date = content.get("expire_date", "")
+        plan = content.get("plan", "")
+        customer = content.get("customer", "")
+        return save_license(target_id, key, lic_type, expire_date, plan, customer)
     except Exception:
         return False
+
