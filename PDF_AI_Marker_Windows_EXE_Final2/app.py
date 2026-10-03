@@ -1,4 +1,14 @@
-"""PDF AI: offline Windows PDF extraction and Vietnamese/English OCR."""
+"""
+PDF AI Marker v3 — Commercial Edition
+Hồ sơ xây dựng sang AI • Tác giả: Kỹ sư Nguyễn Bảo Tú (23HG) — baotuhg@gmail.com
+Giao diện Hiện đại chuẩn Windows 11 (Fluent Modern Theme & Dark Mode)
+Thanh bên (Sidebar) chuyển 5 Tab:
+  1. 📁 Bóc tách hồ sơ (PDF / Word / Excel / Scan OCR tiếng Việt)
+  2. 📊 Bảng số liệu Excel (Trình duyệt bảng trích xuất & Đối chiếu trực quan)
+  3. 🤖 Trợ lý AI (Local RAG Copilot hỏi đáp hồ sơ thiết kế)
+  4. 🔑 Bản quyền & Đám mây (License Dashboard & Cloud Auto-Recovery)
+  5. ⚙️ Cài đặt Hệ thống (Dark/Light Theme, GPU NVIDIA, Cloud Endpoint)
+"""
 from pathlib import Path
 import json
 import os
@@ -8,18 +18,31 @@ import threading
 import unicodedata
 from datetime import datetime
 import ctypes
+
 try:
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('PDF_AI_Marker.DesktopApp.3.0')
 except Exception:
     pass
+
 from PySide6.QtCore import QTimer, Qt
-from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
-    QHBoxLayout, QLabel, QPushButton, QListWidget, QComboBox, QLineEdit,
-    QProgressBar, QPlainTextEdit, QFileDialog, QMessageBox)
+from PySide6.QtGui import QIcon, QFont
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QPushButton, QListWidget, QComboBox, QLineEdit,
+    QProgressBar, QPlainTextEdit, QFileDialog, QMessageBox,
+    QStackedWidget, QFrame, QTableWidget, QTableWidgetItem,
+    QHeaderView, QRadioButton, QButtonGroup, QScrollArea, QSplitter
+)
+
 from marker_bridge import convert, Cancelled
-from license_core import verify_license
+from license_core import (
+    verify_license, get_license_status, _get_machine_id,
+    save_license, import_license_file
+)
 from license_dialog import LicenseDialog
+from license_cloud import recover_license_from_cloud, get_cloud_config, save_cloud_config
+from license_core import _get_candidate_machine_ids
+from fluent_theme import get_current_theme, save_current_theme, get_theme_qss
 
 # (mã chế độ cho marker_worker, nhãn hiển thị)
 MODES = [
@@ -31,163 +54,383 @@ MODES = [
     ('text', '[Marker Text] Chỉ text Marker (không OCR)'),
 ]
 
+_EXTS = ('.pdf', '.docx', '.xlsx', '.xlsm')
+
 
 def detect_nvidia_gpu():
     try:
         import subprocess
-        r = subprocess.run(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'],
-                           capture_output=True, text=True, timeout=3,
-                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        r = subprocess.run(
+            ['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'],
+            capture_output=True, text=True, timeout=3,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+        )
         if r.returncode == 0 and r.stdout.strip():
             return r.stdout.strip().splitlines()[0]
     except Exception:
         pass
     return ''
 
-_EXTS = ('.pdf', '.docx', '.xlsx', '.xlsm')  # .doc/.xls đời cũ: chuyển sang .docx/.xlsx trước
 
 class App(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('PDF AI Marker v3 • Hồ sơ xây dựng sang AI — Tác giả: Nguyễn Bảo Tú (23HG)')
+        self.setWindowTitle('PDF AI Marker v3 • Hồ sơ xây dựng sang AI — Kỹ sư Nguyễn Bảo Tú (23HG)')
+        
         icon_p = Path(__file__).resolve().parent / 'app_icon.ico'
         if not icon_p.exists():
             icon_p = Path(sys.executable).resolve().parent / 'app_icon.ico'
         if icon_p.exists():
             self.setWindowIcon(QIcon(str(icon_p)))
-        self.resize(1040, 850)
-        self.setMinimumSize(850, 740)
+
+        self.resize(1180, 860)
+        self.setMinimumSize(960, 740)
         self.setAcceptDrops(True)
+
         self.events = queue.Queue()
         self.cancel = threading.Event()
         self.files = []
         self.busy = False
         self.latest = ''
         self.result_dir = None
-        self.history = []  # (thư mục kết quả, file gốc, mật khẩu) để mở Đối chiếu trực quan
+        self.history = []  # (thư mục kết quả, file gốc, mật khẩu)
         self.inspector = None
         self.chat_win = None
-        self.setStyleSheet("""
-            QMainWindow, QWidget { background: #f3f6fb; color: #19324e; font: 10pt 'Segoe UI'; }
-            QPushButton { background: white; border: 1px solid #d7e0ec; border-radius: 7px; padding: 9px 15px; }
-            QPushButton:hover { background: #e7effa; }
-            QPushButton:disabled { color: #95a0b0; }
-            QPushButton#primary { background: #205dd8; color: white; border: none; font-weight: 600; }
-            QPushButton#primary:disabled { background: #90a8d7; }
-            QListWidget, QPlainTextEdit, QLineEdit, QComboBox { background: white; border: 1px solid #d7e0ec; border-radius: 6px; padding: 7px; }
-            QProgressBar { border: none; background: #e0e7f1; height: 6px; border-radius: 3px; }
-            QProgressBar::chunk { background: #205dd8; }
-        """)
+        self.current_loaded_tables = []
+        self.nav_buttons = []
+
+        # ── 1. KHỞI TẠO THEME FLUENT UI ─────────────────────────────────────
+        self.current_theme = get_current_theme()
+        self.setStyleSheet(get_theme_qss(self.current_theme))
+
+        # ── 2. XÂY DỰNG LAYOUT CHÍNH: SIDEBAR + STACKED CONTENT ──────────────
         central = QWidget()
+        central.setObjectName("centralWidget")
         self.setCentralWidget(central)
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(26, 22, 26, 22)
-        layout.setSpacing(12)
+        main_layout = QHBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        top_row = QHBoxLayout()
-        title = QLabel('PDF → AI  ·  v3')
-        title.setStyleSheet("font: bold 26pt 'Segoe UI'; color: #0f2d59;")
-        top_row.addWidget(title)
-        top_row.addStretch()
+        # Thanh bên Sidebar (trái)
+        sidebar = self._create_sidebar()
+        main_layout.addWidget(sidebar)
 
-        self.btn_license = QPushButton('🔑 Kiểm tra BẢN QUYỀN')
-        self.btn_license.clicked.connect(self.show_license_info)
-        top_row.addWidget(self.btn_license)
-        layout.addLayout(top_row)
+        # Vùng nội dung QStackedWidget 5 trang (phải)
+        self.stack = QStackedWidget()
+        main_layout.addWidget(self.stack, 1)
 
-        desc = QLabel('Tác giả: <b>Nguyễn Bảo Tú (23HG)</b>  ·  OCR tiếng Việt có dấu, bảng số liệu theo đường kẻ ô, khung tên bản vẽ. Kéo & thả PDF / Word / Excel vào cửa sổ.')
-        desc.setTextFormat(Qt.RichText)
-        layout.addWidget(desc)
-        row = QHBoxLayout()
-        self.add = QPushButton('+ Chọn file (PDF/Word/Excel)')
+        self.page_extract = self._create_page_extract()
+        self.page_tables = self._create_page_tables()
+        self.page_chat = self._create_page_chat()
+        self.page_license = self._create_page_license()
+        self.page_settings = self._create_page_settings()
+
+        self.stack.addWidget(self.page_extract)   # Tab 0
+        self.stack.addWidget(self.page_tables)    # Tab 1
+        self.stack.addWidget(self.page_chat)      # Tab 2
+        self.stack.addWidget(self.page_license)   # Tab 3
+        self.stack.addWidget(self.page_settings)  # Tab 4
+
+        # Mặc định mở Tab 0 (Bóc tách hồ sơ)
+        self.switch_tab(0)
+
+        # ── 3. KIỂM TRA BẢN QUYỀN KHỞI ĐỘNG ──────────────────────────────────
+        self.refresh_license_badge()
+        ok, machine_id = verify_license()
+        if not ok:
+            dlg = LicenseDialog(machine_id, self)
+            if dlg.exec() != LicenseDialog.Accepted:
+                sys.exit(0)
+            self.refresh_license_badge()
+
+        # ── 4. TIMER SỰ KIỆN NỀN ─────────────────────────────────────────────
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.poll)
+        self.timer.start(100)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # XÂY DỰNG THANH BÊN (SIDEBAR) CHUẨN WINDOWS 11 FLUENT UI
+    # ─────────────────────────────────────────────────────────────────────────
+    def _create_sidebar(self) -> QWidget:
+        sidebar = QWidget()
+        sidebar.setObjectName("sidebar")
+        sidebar.setFixedWidth(236)
+        layout = QVBoxLayout(sidebar)
+        layout.setContentsMargins(14, 20, 14, 16)
+        layout.setSpacing(8)
+
+        # Brand Title & Logo
+        lbl_brand = QLabel("PDF AI Marker")
+        lbl_brand.setObjectName("brandTitle")
+        layout.addWidget(lbl_brand)
+
+        lbl_sub = QLabel("v3 Commercial Edition")
+        lbl_sub.setObjectName("brandSub")
+        layout.addWidget(lbl_sub)
+
+        lbl_author = QLabel("Tác giả: Nguyễn Bảo Tú (23HG)")
+        lbl_author.setStyleSheet("font-size: 8pt; color: #64748b; margin-bottom: 10px;")
+        layout.addWidget(lbl_author)
+
+        # Thanh phân cách
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet("color: #334155; margin-bottom: 6px;")
+        layout.addWidget(sep)
+
+        # Danh sách 5 nút điều hướng
+        self.btn_nav_extract = QPushButton("📁  Bóc tách hồ sơ")
+        self.btn_nav_extract.setProperty("class", "nav-btn")
+        self.btn_nav_extract.clicked.connect(lambda: self.switch_tab(0))
+        layout.addWidget(self.btn_nav_extract)
+        self.nav_buttons.append(self.btn_nav_extract)
+
+        self.btn_nav_tables = QPushButton("📊  Bảng số liệu Excel")
+        self.btn_nav_tables.setProperty("class", "nav-btn")
+        self.btn_nav_tables.clicked.connect(lambda: self.switch_tab(1))
+        layout.addWidget(self.btn_nav_tables)
+        self.nav_buttons.append(self.btn_nav_tables)
+
+        self.btn_nav_chat = QPushButton("🤖  Trợ lý AI (RAG)")
+        self.btn_nav_chat.setProperty("class", "nav-btn")
+        self.btn_nav_chat.clicked.connect(lambda: self.switch_tab(2))
+        layout.addWidget(self.btn_nav_chat)
+        self.nav_buttons.append(self.btn_nav_chat)
+
+        self.btn_nav_license = QPushButton("🔑  Bản quyền")
+        self.btn_nav_license.setProperty("class", "nav-btn")
+        self.btn_nav_license.clicked.connect(lambda: self.switch_tab(3))
+        layout.addWidget(self.btn_nav_license)
+        self.nav_buttons.append(self.btn_nav_license)
+
+        self.btn_nav_settings = QPushButton("⚙️  Cài đặt")
+        self.btn_nav_settings.setProperty("class", "nav-btn")
+        self.btn_nav_settings.clicked.connect(lambda: self.switch_tab(4))
+        layout.addWidget(self.btn_nav_settings)
+        self.nav_buttons.append(self.btn_nav_settings)
+
+        layout.addStretch()
+
+        # Footer của Sidebar: Nút đổi nhanh Theme + Badge Bản quyền + GPU status
+        theme_txt = "☀️ Chế độ Sáng" if self.current_theme == "dark" else "🌙 Chế độ Tối"
+        self.btn_sidebar_theme = QPushButton(theme_txt)
+        self.btn_sidebar_theme.setStyleSheet("font-size: 9pt; padding: 7px 12px; border-radius: 6px;")
+        self.btn_sidebar_theme.clicked.connect(self.toggle_theme)
+        layout.addWidget(self.btn_sidebar_theme)
+
+        self.lbl_sidebar_license = QPushButton("👑 Bản quyền")
+        self.lbl_sidebar_license.setStyleSheet(
+            "font-size: 8.5pt; font-weight: 700; color: #38bdf8; padding: 6px 10px; "
+            "background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 6px;"
+        )
+        self.lbl_sidebar_license.clicked.connect(lambda: self.switch_tab(3))
+        layout.addWidget(self.lbl_sidebar_license)
+
+        gpu = detect_nvidia_gpu()
+        gpu_txt = f"🟢 {gpu[:22]}..." if len(gpu) > 22 else (f"🟢 {gpu}" if gpu else "⚪ Chế độ CPU")
+        self.lbl_sidebar_gpu = QLabel(gpu_txt)
+        self.lbl_sidebar_gpu.setStyleSheet("font-size: 8pt; color: #94a3b8;")
+        self.lbl_sidebar_gpu.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.lbl_sidebar_gpu)
+
+        return sidebar
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # CHUYỂN TAB & CẬP NHẬT TRẠNG THÁI ACTIVE CỦA NÚT SIDEBAR
+    # ─────────────────────────────────────────────────────────────────────────
+    def switch_tab(self, index: int):
+        self.stack.setCurrentIndex(index)
+        for i, btn in enumerate(self.nav_buttons):
+            is_active = (i == index)
+            btn.setProperty("active", "true" if is_active else "false")
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+
+        if index == 1:
+            self.refresh_tables_tab()
+        elif index == 2:
+            if self.result_dir and Path(self.result_dir).exists():
+                if self.chat_win and self.chat_win.current_folder != self.result_dir:
+                    self.chat_win.load_project(str(self.result_dir))
+        elif index == 3:
+            self.refresh_license_page()
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ĐỔI THEME DARK / LIGHT FLUENT MODE
+    # ─────────────────────────────────────────────────────────────────────────
+    def toggle_theme(self):
+        new_theme = "light" if self.current_theme == "dark" else "dark"
+        self.apply_theme(new_theme)
+
+    def apply_theme(self, theme_name: str):
+        self.current_theme = theme_name
+        save_current_theme(theme_name)
+        self.setStyleSheet(get_theme_qss(theme_name))
+        theme_txt = "☀️ Chế độ Sáng" if theme_name == "dark" else "🌙 Chế độ Tối"
+        if hasattr(self, "btn_sidebar_theme"):
+            self.btn_sidebar_theme.setText(theme_txt)
+        if hasattr(self, "rb_theme_dark") and hasattr(self, "rb_theme_light"):
+            self.rb_theme_dark.setChecked(theme_name == "dark")
+            self.rb_theme_light.setChecked(theme_name == "light")
+        self.refresh_license_badge()
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TAB 0: 📁 BÓC TÁCH HỒ SƠ (XỬ LÝ CHÍNH)
+    # ─────────────────────────────────────────────────────────────────────────
+    def _create_page_extract(self) -> QWidget:
+        page = QWidget()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
+
+        # Header trang
+        header_row = QHBoxLayout()
+        v_head = QVBoxLayout()
+        t_page = QLabel("📁 Bóc tách Hồ sơ Xây dựng sang AI")
+        t_page.setObjectName("pageTitle")
+        sub_page = QLabel("OCR tiếng Việt có dấu • Bảng số liệu kẻ ô viền • Khung tên bản vẽ • Chạy 100% Offline")
+        sub_page.setObjectName("pageSubtitle")
+        v_head.addWidget(t_page)
+        v_head.addWidget(sub_page)
+        header_row.addLayout(v_head)
+        header_row.addStretch()
+
+        self.btn_license = QPushButton("👑 Bản quyền")
+        self.btn_license.clicked.connect(lambda: self.switch_tab(3))
+        header_row.addWidget(self.btn_license)
+        layout.addLayout(header_row)
+
+        # ── CARD 1: DANH SÁCH FILE ĐẦU VÀO ───────────────────────────────────
+        card_files = QFrame()
+        card_files.setProperty("class", "card")
+        l_files = QVBoxLayout(card_files)
+        l_files.setContentsMargins(16, 14, 16, 14)
+        l_files.setSpacing(10)
+
+        t_card1 = QLabel("Tài liệu đầu vào (Kéo & thả PDF / Word / Excel vào đây)")
+        t_card1.setProperty("class", "card-title")
+        l_files.addWidget(t_card1)
+
+        row_fbtns = QHBoxLayout()
+        self.add = QPushButton("+ Chọn file (PDF/Word/Excel)")
         self.add.clicked.connect(self.choose)
-        self.add_dir = QPushButton('📁 Chọn Thư mục (Batch)')
+        self.add_dir = QPushButton("📁 Chọn Thư mục (Batch)")
         self.add_dir.clicked.connect(self.choose_folder)
-        self.remove = QPushButton('Xóa danh sách')
+        self.remove = QPushButton("Xóa danh sách")
         self.remove.clicked.connect(self.clear)
-        row.addWidget(self.add)
-        row.addWidget(self.add_dir)
-        row.addWidget(self.remove)
-        row.addStretch()
-        self.count = QLabel('Chưa chọn file (hoặc kéo thả PDF/Word/Excel/Thư mục vào đây)')
-        row.addWidget(self.count)
-        layout.addLayout(row)
+        row_fbtns.addWidget(self.add)
+        row_fbtns.addWidget(self.add_dir)
+        row_fbtns.addWidget(self.remove)
+        row_fbtns.addStretch()
+        self.count = QLabel("Chưa chọn file (hoặc kéo thả PDF/Word/Excel/Thư mục vào đây)")
+        row_fbtns.addWidget(self.count)
+        l_files.addLayout(row_fbtns)
+
         self.listbox = QListWidget()
-        self.listbox.setMaximumHeight(110)
-        layout.addWidget(self.listbox)
-        row = QHBoxLayout()
-        row.addWidget(QLabel('Cách đọc'))
+        self.listbox.setMaximumHeight(105)
+        l_files.addWidget(self.listbox)
+        layout.addWidget(card_files)
+
+        # ── CARD 2: CẤU HÌNH OCR & LƯU TRỮ ──────────────────────────────────
+        card_cfg = QFrame()
+        card_cfg.setProperty("class", "card")
+        l_cfg = QVBoxLayout(card_cfg)
+        l_cfg.setContentsMargins(16, 14, 16, 14)
+        l_cfg.setSpacing(10)
+
+        t_card2 = QLabel("Cấu hình Chế độ nhận dạng & Thư mục lưu kết quả")
+        t_card2.setProperty("class", "card-title")
+        l_cfg.addWidget(t_card2)
+
+        row_mode = QHBoxLayout()
+        row_mode.addWidget(QLabel("Cách đọc:"))
         self.mode = QComboBox()
         self.mode.addItems([m[1] for m in MODES])
-        row.addWidget(self.mode, 1)
-        row.addWidget(QLabel('Mật khẩu PDF (nếu có)'))
+        row_mode.addWidget(self.mode, 1)
+
+        row_mode.addWidget(QLabel("Mật khẩu PDF:"))
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
-        self.password.setMaximumWidth(180)
-        row.addWidget(self.password)
-        layout.addLayout(row)
-        row = QHBoxLayout()
-        row.addWidget(QLabel('Lưu tại'))
+        self.password.setMaximumWidth(160)
+        row_mode.addWidget(self.password)
+        l_cfg.addLayout(row_mode)
+
+        row_save = QHBoxLayout()
+        row_save.addWidget(QLabel("Lưu tại:"))
         self.out = QLineEdit(str(Path.home() / 'Documents' / 'PDF_AI_KetQua'))
-        row.addWidget(self.out, 1)
-        self.folder = QPushButton('Chọn thư mục')
+        row_save.addWidget(self.out, 1)
+        self.folder = QPushButton("Chọn thư mục")
         self.folder.clicked.connect(self.output)
-        row.addWidget(self.folder)
-        layout.addLayout(row)
-        row = QHBoxLayout()
-        row.addWidget(QLabel('Trang cần đọc'))
+        row_save.addWidget(self.folder)
+
+        row_save.addWidget(QLabel("Trang cần đọc:"))
         self.pages = QLineEdit()
-        self.pages.setPlaceholderText('Dể trống = tất cả; ví dụ 1-3,5')
-        row.addWidget(self.pages, 1)
-        layout.addLayout(row)
-        layout.addWidget(QLabel('Xuất: Markdown • Bảng số liệu JSON + Excel (.xlsx) • Khung tên • Chia đoạn cho RAG • Danh sách cần đối chiếu • 🔍 Đối chiếu trực quan với bản vẽ gốc'))
-        row = QHBoxLayout()
-        self.run = QPushButton('Chuyển đổi cho AI')
-        self.run.setObjectName('primary')
+        self.pages.setPlaceholderText("Trống = tất cả (vd: 1-3,5)")
+        self.pages.setMaximumWidth(160)
+        row_save.addWidget(self.pages)
+        l_cfg.addLayout(row_save)
+
+        layout.addWidget(card_cfg)
+
+        # ── CARD 3: ĐIỀU KHIỂN & KẾT QUẢ ────────────────────────────────────
+        card_run = QFrame()
+        card_run.setProperty("class", "card")
+        l_run = QVBoxLayout(card_run)
+        l_run.setContentsMargins(16, 14, 16, 14)
+        l_run.setSpacing(10)
+
+        row_act = QHBoxLayout()
+        self.run = QPushButton("Chuyển đổi cho AI")
+        self.run.setObjectName("primaryAction")
         self.run.clicked.connect(self.start)
-        self.stop = QPushButton('Dừng')
+        self.stop = QPushButton("Dừng")
         self.stop.setEnabled(False)
         self.stop.clicked.connect(self.cancel.set)
-        row.addWidget(self.run)
-        row.addWidget(self.stop)
-        row.addStretch()
-        copy = QPushButton('Sao chép nội dung')
+        row_act.addWidget(self.run)
+        row_act.addWidget(self.stop)
+        row_act.addStretch()
+
+        copy = QPushButton("Sao chép nội dung")
         copy.clicked.connect(self.copy)
-        row.addWidget(copy)
-        open_button = QPushButton('Mở kết quả')
+        row_act.addWidget(copy)
+
+        open_button = QPushButton("Mở thư mục")
         open_button.clicked.connect(self.open_result)
-        row.addWidget(open_button)
-        self.inspect_button = QPushButton('🔍 Đối chiếu trực quan')
-        self.inspect_button.setToolTip('Mở bản vẽ gốc song song với bảng số liệu: bấm vào ô/dòng để khoanh đỏ đúng vị trí trên bản vẽ')
-        self.inspect_button.setStyleSheet(
-            "QPushButton { background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa; font-weight: 600; } "
-            "QPushButton:hover { background: #ffedd5; }"
-        )
+        row_act.addWidget(open_button)
+
+        self.inspect_button = QPushButton("🔍 Đối chiếu trực quan")
+        self.inspect_button.setToolTip("Mở bản vẽ gốc song song với bảng số liệu: bấm ô để khoanh đỏ đúng vị trí")
+        self.inspect_button.setObjectName("accentAction")
         self.inspect_button.clicked.connect(self.open_inspector)
-        row.addWidget(self.inspect_button)
-        self.chat_button = QPushButton('🤖 Trợ lý AI (RAG)')
-        self.chat_button.setToolTip('Hỏi đáp thông minh 100% offline với hồ sơ thiết kế, bản vẽ và dự toán vừa chuyển đổi')
-        self.chat_button.setStyleSheet(
-            "QPushButton { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; font-weight: 600; } "
-            "QPushButton:hover { background: #dbeafe; }"
-        )
+        row_act.addWidget(self.inspect_button)
+
+        self.chat_button = QPushButton("🤖 Trợ lý AI (RAG)")
+        self.chat_button.setToolTip("Hỏi đáp thông minh 100% offline với hồ sơ thiết kế vừa chuyển đổi")
         self.chat_button.clicked.connect(self.open_chat)
-        row.addWidget(self.chat_button)
-        layout.addLayout(row)
+        row_act.addWidget(self.chat_button)
+        l_run.addLayout(row_act)
+
         self.progress = QProgressBar()
         self.progress.setTextVisible(False)
-        layout.addWidget(self.progress)
+        l_run.addWidget(self.progress)
+
         _gpu = detect_nvidia_gpu()
-        # Không có GPU NVIDIA thì Surya rất chậm -> mặc định chế độ OCR nhanh
         self.mode.setCurrentIndex(0 if _gpu else 1)
         self.status = QLabel(
             f'PDF AI v3 | {"GPU: " + _gpu if _gpu else "Không có GPU NVIDIA"} | '
             'Tiếng Việt có dấu ~15–40s/trang (GPU) | OCR nhanh ~5–8s/trang | Bản gõ ~0.3s/trang'
         )
         self.status.setWordWrap(True)
-        layout.addWidget(self.status)
+        l_run.addWidget(self.status)
+
         self.preview = QPlainTextEdit()
         self.preview.setReadOnly(True)
+        self.preview.setMinimumHeight(180)
         self.preview.setPlainText(
             'Chọn file PDF, Word (.docx) hoặc Excel (.xlsx), chọn cách đọc rồi bấm Chuyển đổi cho AI. Chạy 100% offline.\n\n'
             '[Khuyến dùng] OCR tiếng Việt có dấu (~15–40s/trang, cần GPU NVIDIA):\n'
@@ -196,27 +439,592 @@ class App(QMainWindow):
             '  Chữ số được kiểm tra chéo giữa 2 bộ OCR; chỗ lệch đánh dấu ⟦OCR khác: ...⟧.\n\n'
             '[Nhanh] Quét OCR không dấu (~5–8s/trang): như trên nhưng không đọc dấu tiếng Việt.\n\n'
             '[Siêu nhanh] Đọc chữ bản gõ PDF (~0.3s/trang): PDF xuất từ Word/Excel/AutoCAD,\n'
-            '  vẫn dựng bảng và khung tên; tự chuyển font cũ TCVN3 (.VnTime) và VNI (VNI-Times).\n'
-            '  Chữ font SHX của AutoCAD: đọc chú thích "AutoCAD SHX Text" nếu có; nếu SHX bị vẽ\n'
-            '  thành nét thì tự OCR bổ sung (~7s/trang, không dấu — cần dấu hãy dùng chế độ tiếng Việt).\n\n'
+            '  vẫn dựng bảng và khung tên; tự chuyển font cũ TCVN3 (.VnTime) và VNI (VNI-Times).\n\n'
             'Kết quả: noi_dung.md • bang_so_lieu.json • bang_so_lieu.xlsx • du_lieu.json • chia_doan.jsonl • can_kiem_tra.md'
         )
-        layout.addWidget(self.preview, 1)
-        # ── LICENSE CHECK & BADGE ──────────────────────────────────────
-        self.refresh_license_badge()
-        ok, machine_id = verify_license()
-        if not ok:
-            dlg = LicenseDialog(machine_id, self)
-            if dlg.exec() != LicenseDialog.Accepted:
-                sys.exit(0)
-            self.refresh_license_badge()
-        # ───────────────────────────────────────────────────────────────
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.poll)
-        self.timer.start(100)
+        l_run.addWidget(self.preview, 1)
 
+        layout.addWidget(card_run)
+
+        scroll.setWidget(container)
+        wrap = QVBoxLayout(page)
+        wrap.setContentsMargins(0, 0, 0, 0)
+        wrap.addWidget(scroll)
+        return page
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TAB 1: 📊 BẢNG SỐ LIỆU EXCEL & ĐỐI CHIẾU TRỰC QUAN
+    # ─────────────────────────────────────────────────────────────────────────
+    def _create_page_tables(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
+
+        # Header
+        h_box = QHBoxLayout()
+        v_h = QVBoxLayout()
+        t_page = QLabel("📊 Bảng Số liệu Trích xuất & Đối chiếu")
+        t_page.setObjectName("pageTitle")
+        sub_page = QLabel("Duyệt toàn bộ các bảng tính bóc tách từ bản vẽ, dự toán và mở bảng tính Excel")
+        sub_page.setObjectName("pageSubtitle")
+        v_h.addWidget(t_page)
+        v_h.addWidget(sub_page)
+        h_box.addLayout(v_h)
+        h_box.addStretch()
+        layout.addLayout(h_box)
+
+        # Card công cụ bảng
+        card_tools = QFrame()
+        card_tools.setProperty("class", "card")
+        l_tools = QVBoxLayout(card_tools)
+        l_tools.setContentsMargins(14, 12, 14, 12)
+        l_tools.setSpacing(10)
+
+        row1 = QHBoxLayout()
+        row1.addWidget(QLabel("Chọn bảng:"))
+        self.combo_tables = QComboBox()
+        self.combo_tables.currentIndexChanged.connect(self._on_table_selected)
+        row1.addWidget(self.combo_tables, 1)
+
+        self.btn_open_excel = QPushButton("📊 Mở file Excel (.xlsx)")
+        self.btn_open_excel.setObjectName("primaryAction")
+        self.btn_open_excel.clicked.connect(self.open_excel_file)
+        row1.addWidget(self.btn_open_excel)
+
+        self.btn_open_inspect_tab = QPushButton("🔍 Mở Đối chiếu trực quan")
+        self.btn_open_inspect_tab.setObjectName("accentAction")
+        self.btn_open_inspect_tab.clicked.connect(self.open_inspector)
+        row1.addWidget(self.btn_open_inspect_tab)
+
+        self.btn_reload_tables = QPushButton("🔄 Nạp lại")
+        self.btn_reload_tables.clicked.connect(self.refresh_tables_tab)
+        row1.addWidget(self.btn_reload_tables)
+
+        self.btn_choose_table_dir = QPushButton("📂 Chọn thư mục khác…")
+        self.btn_choose_table_dir.clicked.connect(self.choose_table_folder)
+        row1.addWidget(self.btn_choose_table_dir)
+        l_tools.addLayout(row1)
+
+        layout.addWidget(card_tools)
+
+        # Bảng dữ liệu QTableWidget
+        self.table_view = QTableWidget()
+        self.table_view.setAlternatingRowColors(True)
+        self.table_view.horizontalHeader().setStretchLastSection(True)
+        self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        layout.addWidget(self.table_view, 1)
+
+        self.lbl_table_info = QLabel("Chưa nạp bảng số liệu. Sau khi bấm 'Chuyển đổi cho AI', bảng sẽ tự động xuất hiện tại đây.")
+        self.lbl_table_info.setStyleSheet("color: #94a3b8; font-size: 9.5pt;")
+        layout.addWidget(self.lbl_table_info)
+
+        return page
+
+    def refresh_tables_tab(self):
+        target_dir = self.result_dir or Path(self.out.text())
+        if target_dir and Path(target_dir).exists():
+            self.load_tables_from_dir(target_dir)
+
+    def choose_table_folder(self):
+        f = QFileDialog.getExistingDirectory(self, "Chọn thư mục kết quả (*_Marker)", str(Path(self.out.text()).parent))
+        if f:
+            self.load_tables_from_dir(Path(f))
+
+    def load_tables_from_dir(self, folder: Path):
+        f_json = folder / "bang_so_lieu.json"
+        if not f_json.exists():
+            sub = next((d for d in folder.glob("*_Marker") if (d / "bang_so_lieu.json").exists()), None)
+            if sub:
+                f_json = sub / "bang_so_lieu.json"
+                folder = sub
+
+        if not f_json.exists():
+            self.combo_tables.clear()
+            self.table_view.clear()
+            self.table_view.setRowCount(0)
+            self.table_view.setColumnCount(0)
+            self.lbl_table_info.setText(f"Không tìm thấy file bang_so_lieu.json trong: {folder}")
+            return
+
+        try:
+            data = json.loads(f_json.read_text(encoding="utf-8"))
+            if not isinstance(data, list) or not data:
+                self.lbl_table_info.setText("Hồ sơ này không có bảng số liệu nào được nhận diện.")
+                return
+
+            self.current_loaded_tables = data
+            self.combo_tables.blockSignals(True)
+            self.combo_tables.clear()
+            for i, t in enumerate(data, 1):
+                pg = t.get("page", "?")
+                sheet = t.get("sheet") or ""
+                stitle = t.get("sheet_title") or ""
+                num_r = len(t.get("rows", []))
+                label = f"Bảng #{i} • Trang {pg}"
+                if sheet or stitle:
+                    label += f" • {sheet} {stitle}".strip()
+                label += f" ({num_r} dòng)"
+                self.combo_tables.addItem(label)
+            self.combo_tables.blockSignals(False)
+
+            self.display_table_data(0)
+        except Exception as e:
+            self.lbl_table_info.setText(f"Lỗi đọc bang_so_lieu.json: {e}")
+
+    def _on_table_selected(self, idx: int):
+        if idx >= 0:
+            self.display_table_data(idx)
+
+    def display_table_data(self, idx: int):
+        if not self.current_loaded_tables or idx < 0 or idx >= len(self.current_loaded_tables):
+            return
+        t = self.current_loaded_tables[idx]
+        headers = t.get("headers", [])
+        rows = t.get("rows", [])
+
+        # Nếu không có header rõ ràng nhưng có rows, lấy độ dài lớn nhất
+        col_count = len(headers)
+        if col_count == 0 and rows:
+            col_count = max(len(r) for r in rows)
+            headers = [f"Cột {c+1}" for c in range(col_count)]
+
+        self.table_view.clear()
+        self.table_view.setColumnCount(col_count)
+        self.table_view.setRowCount(len(rows))
+        self.table_view.setHorizontalHeaderLabels(headers)
+
+        for r_i, row in enumerate(rows):
+            for c_i, val in enumerate(row):
+                if c_i < col_count:
+                    item = QTableWidgetItem(str(val if val is not None else ""))
+                    self.table_view.setItem(r_i, c_i, item)
+
+        self.table_view.resizeColumnsToContents()
+        # Giới hạn chiều rộng cột không quá 320px
+        for c_i in range(col_count):
+            if self.table_view.columnWidth(c_i) > 320:
+                self.table_view.setColumnWidth(c_i, 320)
+
+        pg = t.get("page", "?")
+        sheet = t.get("sheet") or ""
+        stitle = t.get("sheet_title") or ""
+        self.lbl_table_info.setText(
+            f"Đang hiển thị Bảng #{idx+1}/{len(self.current_loaded_tables)} • "
+            f"Trang {pg} • {len(rows)} dòng x {col_count} cột"
+            + (f" • Bản vẽ: {sheet} - {stitle}" if sheet or stitle else "")
+        )
+
+    def open_excel_file(self):
+        target_dir = self.result_dir or Path(self.out.text())
+        if not target_dir:
+            return
+        p_excel = target_dir / "bang_so_lieu.xlsx"
+        if not p_excel.exists():
+            sub = next((d for d in target_dir.glob("*_Marker") if (d / "bang_so_lieu.xlsx").exists()), None)
+            if sub:
+                p_excel = sub / "bang_so_lieu.xlsx"
+
+        if p_excel.exists():
+            os.startfile(str(p_excel))
+        else:
+            QMessageBox.information(self, "Chưa có file Excel", f"Không tìm thấy file bang_so_lieu.xlsx trong:\n{target_dir}")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TAB 2: 🤖 TRỢ LÝ AI (LOCAL RAG COPILOT)
+    # ─────────────────────────────────────────────────────────────────────────
+    def _create_page_chat(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+
+        from chat_window import ChatWindow
+        self.chat_win = ChatWindow(self, inspector_window=self.inspector)
+        layout.addWidget(self.chat_win)
+        return page
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TAB 3: 🔑 QUẢN LÝ BẢN QUYỀN & ĐÁM MÂY (LICENSE DASHBOARD)
+    # ─────────────────────────────────────────────────────────────────────────
+    def _create_page_license(self) -> QWidget:
+        page = QWidget()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
+
+        # Header
+        t_page = QLabel("🔑 Trung tâm Bản quyền & Quản lý License")
+        t_page.setObjectName("pageTitle")
+        sub_page = QLabel("Xác thực bản quyền gắn liền máy trạm (Node-locked) & Tự động phục hồi qua Đám Mây")
+        sub_page.setObjectName("pageSubtitle")
+        layout.addWidget(t_page)
+        layout.addWidget(sub_page)
+
+        # Card 1: Trạng thái bản quyền hiện tại
+        card_st = QFrame()
+        card_st.setProperty("class", "card")
+        l_st = QVBoxLayout(card_st)
+        l_st.setContentsMargins(18, 16, 18, 16)
+        l_st.setSpacing(10)
+
+        t_c1 = QLabel("Trạng thái Bản quyền Hiện tại")
+        t_c1.setProperty("class", "card-title")
+        l_st.addWidget(t_c1)
+
+        self.lbl_lic_status_banner = QLabel("👑 BẢN QUYỀN VĨNH VIỄN (150 NĂM)")
+        self.lbl_lic_status_banner.setStyleSheet(
+            "font-size: 12pt; font-weight: 700; color: #38bdf8; padding: 10px 14px; "
+            "background: rgba(56, 189, 248, 0.12); border: 1.5px solid rgba(56, 189, 248, 0.35); border-radius: 8px;"
+        )
+        l_st.addWidget(self.lbl_lic_status_banner)
+
+        self.lbl_lic_details = QLabel("Đang tải thông tin...")
+        self.lbl_lic_details.setTextFormat(Qt.RichText)
+        self.lbl_lic_details.setStyleSheet("font-size: 10pt; color: #cbd5e1; line-height: 140%;")
+        l_st.addWidget(self.lbl_lic_details)
+
+        # Hàng Machine ID
+        row_mid = QHBoxLayout()
+        row_mid.addWidget(QLabel("Mã máy tính (Machine ID):"))
+        self.txt_lic_mid = QLineEdit(_get_machine_id())
+        self.txt_lic_mid.setReadOnly(True)
+        row_mid.addWidget(self.txt_lic_mid, 1)
+
+        btn_copy_mid = QPushButton("📋 Sao chép Machine ID")
+        btn_copy_mid.clicked.connect(self.copy_machine_id)
+        row_mid.addWidget(btn_copy_mid)
+        l_st.addLayout(row_mid)
+
+        # Bảo mật phần cứng
+        hw_info = QLabel(
+            "🔒 <b>Cơ chế bảo vệ:</b> CPU + BIOS + Ổ đĩa + Motherboard  |  "
+            "Chống lùi đồng hồ (ClockAnchor): <b>Kích hoạt</b>  |  "
+            "Sao lưu đa ổ đĩa: <b>Hoạt động</b>"
+        )
+        hw_info.setTextFormat(Qt.RichText)
+        hw_info.setStyleSheet("font-size: 9pt; color: #64748b; margin-top: 4px;")
+        l_st.addWidget(hw_info)
+
+        layout.addWidget(card_st)
+
+        # Card 2: Kích hoạt & Gia hạn
+        card_act = QFrame()
+        card_act.setProperty("class", "card")
+        l_act = QVBoxLayout(card_act)
+        l_act.setContentsMargins(18, 16, 18, 16)
+        l_act.setSpacing(10)
+
+        t_c2 = QLabel("Kích hoạt hoặc Nâng cấp Bản quyền")
+        t_c2.setProperty("class", "card-title")
+        l_act.addWidget(t_c2)
+
+        desc_act = QLabel(
+            "Nếu bạn có chuỗi License Key hoặc file bản quyền (.lic) do tác giả cung cấp, hãy dán hoặc chọn file bên dưới:"
+        )
+        desc_act.setStyleSheet("font-size: 9.5pt; color: #94a3b8;")
+        l_act.addWidget(desc_act)
+
+        row_key = QHBoxLayout()
+        self.txt_lic_input = QLineEdit()
+        self.txt_lic_input.setPlaceholderText("Dán chuỗi License Key (hoặc mã kích hoạt) vào đây...")
+        row_key.addWidget(self.txt_lic_input, 1)
+
+        btn_apply = QPushButton("Kích hoạt ngay")
+        btn_apply.setObjectName("primaryAction")
+        btn_apply.clicked.connect(self.apply_license_key)
+        row_key.addWidget(btn_apply)
+
+        btn_lic_file = QPushButton("Chọn file .lic…")
+        btn_lic_file.clicked.connect(self.choose_lic_file)
+        row_key.addWidget(btn_lic_file)
+        l_act.addLayout(row_key)
+
+        layout.addWidget(card_act)
+
+        # Card 3: Khôi phục qua Đám mây (Cloud Auto-Recovery)
+        card_cloud = QFrame()
+        card_cloud.setProperty("class", "card")
+        l_cloud = QVBoxLayout(card_cloud)
+        l_cloud.setContentsMargins(18, 16, 18, 16)
+        l_cloud.setSpacing(10)
+
+        t_c3 = QLabel("☁️ Tự động Khôi phục Bản quyền từ Đám Mây (Google Sheets API)")
+        t_c3.setProperty("class", "card-title")
+        l_cloud.addWidget(t_c3)
+
+        desc_cloud = QLabel(
+            "Khi cài lại Windows, đổi ổ đĩa hoặc format máy: Nhấn nút bên dưới để tự động kết nối lên hệ thống Cloud "
+            "của Tác giả để tải lại bản quyền của máy tính này mà không cần nhập lại mã."
+        )
+        desc_cloud.setWordWrap(True)
+        desc_cloud.setStyleSheet("font-size: 9.5pt; color: #94a3b8;")
+        l_cloud.addWidget(desc_cloud)
+
+        row_cbtns = QHBoxLayout()
+        self.btn_cloud_sync = QPushButton("☁️ Khôi phục bản quyền từ Cloud")
+        self.btn_cloud_sync.setObjectName("accentAction")
+        self.btn_cloud_sync.clicked.connect(self.restore_license_from_cloud)
+        row_cbtns.addWidget(self.btn_cloud_sync)
+
+        self.lbl_cloud_status = QLabel("Trạng thái Cloud: Sẵn sàng")
+        self.lbl_cloud_status.setStyleSheet("color: #94a3b8; font-size: 9.5pt;")
+        row_cbtns.addWidget(self.lbl_cloud_status, 1)
+        l_cloud.addLayout(row_cbtns)
+
+        layout.addWidget(card_cloud)
+
+        scroll.setWidget(container)
+        wrap = QVBoxLayout(page)
+        wrap.setContentsMargins(0, 0, 0, 0)
+        wrap.addWidget(scroll)
+        return page
+
+    def refresh_license_page(self):
+        st = get_license_status()
+        status = st.get("status", "EXPIRED")
+        plan = st.get("plan", "LIFETIME")
+        days_left = st.get("days_left", 0)
+        exp_date = st.get("expire_date", "")
+        customer = st.get("customer", "")
+
+        if status == "ACTIVE":
+            if plan == "LIFETIME":
+                self.lbl_lic_status_banner.setText("👑 BẢN QUYỀN VĨNH VIỄN (150 NĂM — TRỌN ĐỜI)")
+                self.lbl_lic_status_banner.setStyleSheet(
+                    "font-size: 12pt; font-weight: 700; color: #38bdf8; padding: 10px 14px; "
+                    "background: rgba(56, 189, 248, 0.12); border: 1.5px solid rgba(56, 189, 248, 0.35); border-radius: 8px;"
+                )
+                self.lbl_lic_details.setText(
+                    f"• Khách hàng / Đơn vị: <b>{customer or 'Kỹ sư Xây dựng'}</b><br>"
+                    f"• Thời hạn sử dụng: <b>{exp_date}</b> (Còn <b>{days_left}</b> ngày)<br>"
+                    "• Quyền lợi: Mở khóa trọn đời toàn bộ tính năng OCR tiếng Việt, bóc tách bảng số liệu, xuất Excel và Trợ lý AI."
+                )
+            elif plan == "1_YEAR":
+                self.lbl_lic_status_banner.setText(f"⭐ BẢN QUYỀN THƯƠNG MẠI 1 NĂM (CÒN {days_left} NGÀY)")
+                self.lbl_lic_status_banner.setStyleSheet(
+                    "font-size: 12pt; font-weight: 700; color: #34d399; padding: 10px 14px; "
+                    "background: rgba(52, 211, 153, 0.12); border: 1.5px solid rgba(52, 211, 153, 0.35); border-radius: 8px;"
+                )
+                self.lbl_lic_details.setText(
+                    f"• Khách hàng / Đơn vị: <b>{customer or 'Quý khách'}</b><br>"
+                    f"• Hết hạn vào ngày: <b>{exp_date}</b> (Còn <b>{days_left}</b> ngày)<br>"
+                    "• Quyền lợi: Đầy đủ tính năng thương mại. Hỗ trợ gia hạn linh hoạt hàng năm."
+                )
+            else:
+                self.lbl_lic_status_banner.setText(f"🔑 BẢN QUYỀN HỢP LỆ (CÒN {days_left} NGÀY)")
+                self.lbl_lic_details.setText(f"Hết hạn vào: <b>{exp_date}</b> (Còn {days_left} ngày)")
+        elif status == "TRIAL":
+            self.lbl_lic_status_banner.setText(f"🎁 BẢN DÙNG THỬ TRẢI NGHIỆM (CÒN {days_left} NGÀY)")
+            self.lbl_lic_status_banner.setStyleSheet(
+                "font-size: 12pt; font-weight: 700; color: #fbbf24; padding: 10px 14px; "
+                "background: rgba(251, 191, 36, 0.12); border: 1.5px solid rgba(251, 191, 36, 0.35); border-radius: 8px;"
+            )
+            self.lbl_lic_details.setText(
+                f"• Gói: <b>Dùng thử miễn phí 30 ngày</b><br>"
+                f"• Còn lại: <b>{days_left}</b> ngày sử dụng<br>"
+                "• Hãy liên hệ tác giả Nguyễn Bảo Tú (23HG) để nâng cấp lên bản quyền 1 Năm hoặc Vĩnh Viễn."
+            )
+        else:
+            self.lbl_lic_status_banner.setText("🔒 HẾT HẠN BẢN QUYỀN — VUI LÒNG KÍCH HOẠT")
+            self.lbl_lic_status_banner.setStyleSheet(
+                "font-size: 12pt; font-weight: 700; color: #f87171; padding: 10px 14px; "
+                "background: rgba(248, 113, 113, 0.12); border: 1.5px solid rgba(248, 113, 113, 0.35); border-radius: 8px;"
+            )
+            self.lbl_lic_details.setText("Thời hạn dùng thử hoặc bản quyền đã hết hạn. Hãy nhập License Key để tiếp tục sử dụng.")
+
+    def copy_machine_id(self):
+        mid = _get_machine_id()
+        QApplication.clipboard().setText(mid)
+        QMessageBox.information(self, "Đã sao chép", f"Đã sao chép Machine ID vào bộ nhớ đệm:\n{mid}\n\nBạn có thể gửi mã này cho tác giả.")
+
+    def apply_license_key(self):
+        k = self.txt_lic_input.text().strip()
+        if not k:
+            QMessageBox.warning(self, "Chưa nhập key", "Vui lòng nhập hoặc dán chuỗi License Key.")
+            return
+        ok, msg = save_license(k)
+        if ok:
+            QMessageBox.information(self, "Kích hoạt thành công", f"Chúc mừng! {msg}")
+            self.txt_lic_input.clear()
+            self.refresh_license_badge()
+            self.refresh_license_page()
+        else:
+            QMessageBox.warning(self, "Kích hoạt thất bại", f"Mã bản quyền không hợp lệ cho máy này:\n{msg}")
+
+    def choose_lic_file(self):
+        f, _ = QFileDialog.getOpenFileName(self, "Chọn file bản quyền", "", "License File (*.lic);;All Files (*.*)")
+        if f:
+            ok, msg = import_license_file(f)
+            if ok:
+                QMessageBox.information(self, "Nạp file thành công", f"Đã nạp file bản quyền thành công:\n{msg}")
+                self.refresh_license_badge()
+                self.refresh_license_page()
+            else:
+                QMessageBox.warning(self, "Lỗi nạp file", f"Không thể nạp file bản quyền:\n{msg}")
+
+    def restore_license_from_cloud(self):
+        cands = _get_candidate_machine_ids()
+
+        self.lbl_cloud_status.setText("Đang kết nối Cloud Google Sheets...")
+        QApplication.processEvents()
+
+        ok, msg, lic_dict = recover_license_from_cloud(cands)
+        if ok and lic_dict:
+            self.lbl_cloud_status.setText("✅ Khôi phục thành công từ Cloud!")
+            QMessageBox.information(self, "Khôi phục Cloud thành công", f"Đã tìm thấy bản quyền trên hệ thống Cloud và tự động kích hoạt lại máy tính!\n{msg}")
+            self.refresh_license_badge()
+            self.refresh_license_page()
+            return
+
+        self.lbl_cloud_status.setText(f"Trạng thái: {msg}")
+        QMessageBox.information(self, "Kết quả khôi phục Cloud", f"{msg}\n\nNếu bạn đã mua bản quyền, vui lòng liên hệ Tác giả để kiểm tra lại trên Google Sheet.")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TAB 4: ⚙️ CÀI ĐẶT HỆ THỐNG & THÔNG TIN TÁC GIẢ
+    # ─────────────────────────────────────────────────────────────────────────
+    def _create_page_settings(self) -> QWidget:
+        page = QWidget()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
+
+        # Header
+        t_page = QLabel("⚙️ Cài đặt Hệ thống & Tùy biến")
+        t_page.setObjectName("pageTitle")
+        sub_page = QLabel("Tùy biến giao diện Fluent UI, cấu hình phần cứng và thông tin tác giả")
+        sub_page.setObjectName("pageSubtitle")
+        layout.addWidget(t_page)
+        layout.addWidget(sub_page)
+
+        # Card 1: Giao diện
+        card_theme = QFrame()
+        card_theme.setProperty("class", "card")
+        l_th = QVBoxLayout(card_theme)
+        l_th.setContentsMargins(18, 16, 18, 16)
+        l_th.setSpacing(10)
+
+        t_th = QLabel("Giao diện Người dùng (Windows 11 Fluent Theme)")
+        t_th.setProperty("class", "card-title")
+        l_th.addWidget(t_th)
+
+        row_th = QHBoxLayout()
+        self.rb_theme_dark = QRadioButton("🌙 Chế độ Tối (Dark Fluent - Slate 900)")
+        self.rb_theme_light = QRadioButton("☀️ Chế độ Sáng (Light Clean - Mica)")
+
+        if self.current_theme == "dark":
+            self.rb_theme_dark.setChecked(True)
+        else:
+            self.rb_theme_light.setChecked(True)
+
+        self.rb_theme_dark.toggled.connect(lambda c: self.apply_theme("dark") if c else None)
+        self.rb_theme_light.toggled.connect(lambda c: self.apply_theme("light") if c else None)
+
+        row_th.addWidget(self.rb_theme_dark)
+        row_th.addWidget(self.rb_theme_light)
+        row_th.addStretch()
+        l_th.addLayout(row_th)
+
+        layout.addWidget(card_theme)
+
+        # Card 2: Phần cứng GPU
+        card_hw = QFrame()
+        card_hw.setProperty("class", "card")
+        l_hw = QVBoxLayout(card_hw)
+        l_hw.setContentsMargins(18, 16, 18, 16)
+        l_hw.setSpacing(8)
+
+        t_hw = QLabel("Tăng tốc Phần cứng AI (Hardware Acceleration)")
+        t_hw.setProperty("class", "card-title")
+        l_hw.addWidget(t_hw)
+
+        gpu = detect_nvidia_gpu()
+        gpu_status_str = f"✅ Phát hiện card đồ họa: <b>{gpu}</b> (Hỗ trợ tăng tốc Surya OCR & PyTorch CUDA)" if gpu else "⚪ Không phát hiện GPU NVIDIA rời. Phần mềm chạy ổn định ở chế độ Rapid OCR (CPU)."
+        lbl_gpu = QLabel(gpu_status_str)
+        lbl_gpu.setTextFormat(Qt.RichText)
+        lbl_gpu.setStyleSheet("font-size: 10pt; color: #cbd5e1;")
+        l_hw.addWidget(lbl_gpu)
+
+        layout.addWidget(card_hw)
+
+        # Card 3: Cloud Endpoint
+        card_cep = QFrame()
+        card_cep.setProperty("class", "card")
+        l_cep = QVBoxLayout(card_cep)
+        l_cep.setContentsMargins(18, 16, 18, 16)
+        l_cep.setSpacing(10)
+
+        t_cep = QLabel("Cấu hình Đám Mây (Cloud Auto-Recovery Endpoint)")
+        t_cep.setProperty("class", "card-title")
+        l_cep.addWidget(t_cep)
+
+        cfg = get_cloud_config()
+        row_cep = QHBoxLayout()
+        row_cep.addWidget(QLabel("Google Apps Script URL:"))
+        self.txt_cloud_url = QLineEdit(cfg.get("api_url", ""))
+        row_cep.addWidget(self.txt_cloud_url, 1)
+
+        btn_save_cloud = QPushButton("Lưu cấu hình Cloud")
+        btn_save_cloud.clicked.connect(self.save_cloud_settings)
+        row_cep.addWidget(btn_save_cloud)
+        l_cep.addLayout(row_cep)
+
+        layout.addWidget(card_cep)
+
+        # Card 4: Tác giả & Bản quyền
+        card_info = QFrame()
+        card_info.setProperty("class", "card")
+        l_info = QVBoxLayout(card_info)
+        l_info.setContentsMargins(18, 16, 18, 16)
+        l_info.setSpacing(8)
+
+        t_info = QLabel("Thông tin Bản quyền & Tác giả")
+        t_info.setProperty("class", "card-title")
+        l_info.addWidget(t_info)
+
+        info_txt = QLabel(
+            "• Phần mềm: <b>PDF AI Marker v3 Commercial Edition</b><br>"
+            "• Tác giả: <b>Kỹ sư Nguyễn Bảo Tú (23HG)</b><br>"
+            "• Email liên hệ & Hỗ trợ kỹ thuật: <b>baotuhg@gmail.com</b><br>"
+            "• Tiêu chuẩn: <b>100% Offline AI</b> — Bảo mật tuyệt đối dữ liệu và hồ sơ thiết kế công trình.<br>"
+            "• Phiên bản giao diện: <b>Windows 11 Fluent UI Glassmorphism</b>"
+        )
+        info_txt.setTextFormat(Qt.RichText)
+        info_txt.setStyleSheet("font-size: 10pt; color: #cbd5e1; line-height: 140%;")
+        l_info.addWidget(info_txt)
+
+        layout.addWidget(card_info)
+
+        scroll.setWidget(container)
+        wrap = QVBoxLayout(page)
+        wrap.setContentsMargins(0, 0, 0, 0)
+        wrap.addWidget(scroll)
+        return page
+
+    def save_cloud_settings(self):
+        url = self.txt_cloud_url.text().strip()
+        if not url:
+            QMessageBox.warning(self, "Thiếu URL", "Vui lòng nhập URL Web App Google Apps Script.")
+            return
+        if save_cloud_config(url):
+            QMessageBox.information(self, "Đã lưu", "Cấu hình Cloud Endpoint đã được cập nhật thành công.")
+        else:
+            QMessageBox.warning(self, "Lỗi", "Không thể ghi file cấu hình cloud_config.json.")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # REFRESH BADGE BẢN QUYỀN
+    # ─────────────────────────────────────────────────────────────────────────
     def refresh_license_badge(self):
-        from license_core import get_license_status
         st = get_license_status()
         status = st.get("status", "EXPIRED")
         plan = st.get("plan", "LIFETIME")
@@ -224,41 +1032,55 @@ class App(QMainWindow):
 
         if status == "ACTIVE":
             if plan == "LIFETIME":
-                self.btn_license.setText("👑 Bản quyền: [VĨNH VIỄN 150 NĂM]")
-                self.btn_license.setStyleSheet(
-                    "QPushButton { background: #eff6ff; color: #1e3a8a; border: 1.5px solid #93c5fd; "
-                    "font-weight: 700; padding: 7px 16px; border-radius: 6px; font-size: 10.5pt; } "
-                    "QPushButton:hover { background: #dbeafe; color: #172554; }"
+                txt = "👑 Bản quyền: [VĨNH VIỄN 150 NĂM]"
+                style = (
+                    "QPushButton { background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1.5px solid #38bdf8; "
+                    "font-weight: 700; padding: 7px 16px; border-radius: 8px; font-size: 10pt; } "
+                    "QPushButton:hover { background: rgba(56, 189, 248, 0.25); }"
                 )
+                sidebar_txt = "👑 150 Năm"
             elif plan == "1_YEAR":
-                self.btn_license.setText(f"⭐ Bản quyền 1 Năm: [CÒN {days_left} NGÀY]")
-                self.btn_license.setStyleSheet(
-                    "QPushButton { background: #ecfdf5; color: #065f46; border: 1.5px solid #a7f3d0; "
-                    "font-weight: 700; padding: 7px 16px; border-radius: 6px; font-size: 10.5pt; } "
-                    "QPushButton:hover { background: #d1fae5; color: #064e3b; }"
+                txt = f"⭐ Bản quyền 1 Năm: [CÒN {days_left} NGÀY]"
+                style = (
+                    "QPushButton { background: rgba(52, 211, 153, 0.15); color: #34d399; border: 1.5px solid #34d399; "
+                    "font-weight: 700; padding: 7px 16px; border-radius: 8px; font-size: 10pt; } "
+                    "QPushButton:hover { background: rgba(52, 211, 153, 0.25); }"
                 )
+                sidebar_txt = f"⭐ 1 Năm ({days_left}d)"
             else:
-                self.btn_license.setText(f"🔑 Bản quyền: [CÒN {days_left} NGÀY]")
-                self.btn_license.setStyleSheet(
-                    "QPushButton { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; "
-                    "font-weight: 600; padding: 7px 16px; border-radius: 6px; font-size: 10.5pt; } "
-                    "QPushButton:hover { background: #d1fae5; color: #064e3b; }"
+                txt = f"🔑 Bản quyền: [CÒN {days_left} NGÀY]"
+                style = (
+                    "QPushButton { background: rgba(52, 211, 153, 0.15); color: #34d399; border: 1px solid #34d399; "
+                    "font-weight: 600; padding: 7px 16px; border-radius: 8px; font-size: 10pt; } "
+                    "QPushButton:hover { background: rgba(52, 211, 153, 0.25); }"
                 )
+                sidebar_txt = f"🔑 Còn {days_left}d"
         elif status == "TRIAL":
-            self.btn_license.setText(f"🎁 Dùng thử: [CÒN {days_left} NGÀY] — Kích hoạt")
-            self.btn_license.setStyleSheet(
-                "QPushButton { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; "
-                "font-weight: 600; padding: 7px 16px; border-radius: 6px; font-size: 10.5pt; } "
-                "QPushButton:hover { background: #fef3c7; color: #78350f; }"
+            txt = f"🎁 Dùng thử: [CÒN {days_left} NGÀY] — Kích hoạt"
+            style = (
+                "QPushButton { background: rgba(251, 191, 36, 0.15); color: #fbbf24; border: 1px solid #fbbf24; "
+                "font-weight: 600; padding: 7px 16px; border-radius: 8px; font-size: 10pt; } "
+                "QPushButton:hover { background: rgba(251, 191, 36, 0.25); }"
             )
+            sidebar_txt = f"🎁 Dùng thử ({days_left}d)"
         else:
-            self.btn_license.setText("🔒 HẾT HẠN BẢN QUYỀN — Nhập key")
-            self.btn_license.setStyleSheet(
-                "QPushButton { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; "
-                "font-weight: 600; padding: 7px 16px; border-radius: 6px; font-size: 10.5pt; } "
-                "QPushButton:hover { background: #fee2e2; color: #7f1d1d; }"
+            txt = "🔒 HẾT HẠN BẢN QUYỀN — Nhập key"
+            style = (
+                "QPushButton { background: rgba(248, 113, 113, 0.15); color: #f87171; border: 1px solid #f87171; "
+                "font-weight: 600; padding: 7px 16px; border-radius: 8px; font-size: 10pt; } "
+                "QPushButton:hover { background: rgba(248, 113, 113, 0.25); }"
             )
+            sidebar_txt = "🔒 Hết hạn"
 
+        if hasattr(self, "btn_license"):
+            self.btn_license.setText(txt)
+            self.btn_license.setStyleSheet(style)
+        if hasattr(self, "lbl_sidebar_license"):
+            self.lbl_sidebar_license.setText(sidebar_txt)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # THAO TÁC QUẢN LÝ DANH SÁCH FILE & DRAG-AND-DROP
+    # ─────────────────────────────────────────────────────────────────────────
     def _add_files(self, file_paths):
         added = 0
         for f in file_paths:
@@ -274,7 +1096,10 @@ class App(QMainWindow):
         return added
 
     def choose(self):
-        files, _ = QFileDialog.getOpenFileNames(self, 'Chọn file', '', 'Hồ sơ (*.pdf *.docx *.xlsx *.xlsm);;PDF (*.pdf);;Word (*.docx);;Excel (*.xlsx *.xlsm)')
+        files, _ = QFileDialog.getOpenFileNames(
+            self, 'Chọn file', '',
+            'Hồ sơ (*.pdf *.docx *.xlsx *.xlsm);;PDF (*.pdf);;Word (*.docx);;Excel (*.xlsx *.xlsm)'
+        )
         self._add_files(files)
 
     def choose_folder(self):
@@ -362,35 +1187,8 @@ class App(QMainWindow):
         self.inspector.choose_result()
 
     def open_chat(self):
-        try:
-            from chat_window import ChatWindow
-        except Exception as exc:
-            QMessageBox.warning(self, 'Trợ lý AI', f'Không khởi động được Trợ lý AI:\n{type(exc).__name__}: {exc}')
-            return
-        if self.chat_win is None:
-            self.chat_win = ChatWindow(self, inspector_window=self.inspector)
-        else:
-            self.chat_win.inspector_window = self.inspector
-
-        if self.history:
-            folder, source, password = self.history[-1]
-            if self.chat_win.current_folder != folder:
-                self.chat_win.load_project(str(folder))
-        elif self.chat_win.current_folder is None:
-            if self.result_dir and Path(self.result_dir).exists():
-                self.chat_win.load_project(str(self.result_dir))
-            else:
-                self.chat_win.choose_folder()
-
-        self.chat_win.show()
-        self.chat_win.raise_()
-        self.chat_win.activateWindow()
-
-    def show_license_info(self):
-        ok, machine_id = verify_license()
-        dlg = LicenseDialog(machine_id, self)
-        dlg.exec()
-        self.refresh_license_badge()
+        # Chuyển thẳng sang Tab 2 (Trợ lý AI tích hợp)
+        self.switch_tab(2)
 
     def closeEvent(self, event):
         if self.busy:
@@ -400,11 +1198,17 @@ class App(QMainWindow):
         else:
             event.accept()
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # TIẾN TRÌNH XỬ LÝ BACKGROUND & QUEUE SỰ KIỆN
+    # ─────────────────────────────────────────────────────────────────────────
     def start(self):
         ok, machine_id = verify_license()
         if not ok:
-            QMessageBox.warning(self, "Hết hạn bản quyền", "Thời hạn dùng thử miễn phí đã hết hoặc máy chưa được kích hoạt.\nVui lòng kích hoạt bản quyền để tiếp tục.")
-            self.show_license_info()
+            QMessageBox.warning(
+                self, "Hết hạn bản quyền",
+                "Thời hạn dùng thử miễn phí đã hết hoặc máy chưa được kích hoạt.\nVui lòng kích hoạt bản quyền để tiếp tục."
+            )
+            self.switch_tab(3)
             return
         if not self.files:
             QMessageBox.information(self, 'Chọn PDF', 'Hãy chọn ít nhất một file PDF/Word/Excel.')
@@ -412,6 +1216,7 @@ class App(QMainWindow):
         if not self.out.text().strip():
             QMessageBox.information(self, 'Thư mục kết quả', 'Hãy chọn thư mục lưu kết quả.')
             return
+
         self.busy = True
         self.cancel.clear()
         self.progress.setRange(0, 0)
@@ -466,8 +1271,13 @@ class App(QMainWindow):
                         self.history.append((tgt if tgt.is_dir() else tgt.parent, event[3], event[4]))
                     preview = self.latest[:150000]
                     if len(self.latest) > 150000:
-                        preview += '\n\n[Xem trước rút gọn; file xuất chứa toàn bộ nội dung.]' 
+                        preview += '\n\n[Xem trước rút gọn; file xuất chứa toàn bộ nội dung.]'
                     self.preview.setPlainText(preview)
+                    # Tự động nạp bảng số liệu vào Tab 1
+                    try:
+                        self.load_tables_from_dir(self.result_dir)
+                    except Exception:
+                        pass
                 elif event[0] == 'done':
                     self.busy = False
                     self.progress.setRange(0, 100)
@@ -476,14 +1286,19 @@ class App(QMainWindow):
                     self.stop.setEnabled(False)
                     self.password.clear()
                     label = 'Đã dừng' if event[4] else 'Hoàn tất'
-                    self.status.setText(f'{label} • {event[1]} file đã xuất • {len(event[2])} lỗi • {len(event[3])} file cần kiểm tra'
-                                        + (' • Bấm 🔍 Đối chiếu hoặc 🤖 Trợ lý AI để tra cứu' if event[1] else ''))
+                    self.status.setText(
+                        f'{label} • {event[1]} file đã xuất • {len(event[2])} lỗi • {len(event[3])} file cần kiểm tra'
+                        + (' • Bấm 📊 Bảng số liệu hoặc 🤖 Trợ lý AI để tra cứu' if event[1] else '')
+                    )
                     if event[2] or event[3]:
-                        QMessageBox.warning(self, 'Kết quả chuyển đổi', '\n'.join(event[2]+event[3])[:5000])
+                        QMessageBox.warning(self, 'Kết quả chuyển đổi', '\n'.join(event[2] + event[3])[:5000])
         except queue.Empty:
             pass
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# ĐIỂM KHỞI CHẠY ỨNG DỤNG (ENTRY POINT)
+# ─────────────────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     icon_p = Path(__file__).resolve().parent / 'app_icon.ico'
@@ -491,8 +1306,10 @@ if __name__ == '__main__':
         icon_p = Path(sys.executable).resolve().parent / 'app_icon.ico'
     if icon_p.exists():
         app.setWindowIcon(QIcon(str(icon_p)))
+
     window = App()
     window.show()
+
     # --inspect "<thư mục>_Marker" : mở thẳng cửa sổ Đối chiếu trực quan cho kết quả có sẵn
     inspect_dir = None
     if '--inspect' in sys.argv:
@@ -509,12 +1326,12 @@ if __name__ == '__main__':
         if i + 1 < len(sys.argv):
             chat_dir = sys.argv[i + 1]
             window.history.append((Path(chat_dir), None, ''))
-            window.open_chat()
+            window.switch_tab(2)
 
     if '--self-test' in sys.argv:
         import time
         t0 = time.time()
-        while time.time() - t0 < (1.5 if (inspect_dir or chat_dir) else 0.1):
+        while time.time() - t0 < (1.5 if (inspect_dir or chat_dir) else 0.2):
             app.processEvents()
             time.sleep(0.02)
         if chat_dir and window.chat_win:
@@ -526,8 +1343,6 @@ if __name__ == '__main__':
         target.grab().save(sys.argv[-1])
         if window.inspector:
             window.inspector.close()
-        if window.chat_win:
-            window.chat_win.close()
         window.close()
     else:
         sys.exit(app.exec())

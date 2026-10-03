@@ -5,6 +5,8 @@ from PyInstaller.utils.hooks import collect_data_files
 block_cipher = None
 
 added_files = [
+    ('fluent_theme.py', '.'),
+    ('theme_config.json', '.'),
     ('license_core.py', '.'),
     ('license_dialog.py', '.'),
     ('license_cloud.py', '.'),
@@ -22,6 +24,7 @@ a = Analysis(
     binaries=[],
     datas=added_files,
     hiddenimports=[
+        'fluent_theme',
         'license_core',
         'license_dialog',
         'license_cloud',
