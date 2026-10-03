@@ -125,6 +125,57 @@ def _verify_sig(target_id: str, sig_str: str) -> bool:
         return False
 
 
+try:
+    import winreg
+except ImportError:
+    winreg = None
+
+_REG_PATH = r"Software\PDF_AI_Marker"
+_REG_KEY_NAME = "LicenseData"
+
+
+def _read_registry_license() -> dict:
+    """Đọc dữ liệu bản quyền lưu trong Windows Registry."""
+    if not winreg or sys.platform != "win32":
+        return None
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REG_PATH, 0, winreg.KEY_READ) as k:
+            val, _ = winreg.QueryValueEx(k, _REG_KEY_NAME)
+            if val:
+                return json.loads(val)
+    except Exception:
+        pass
+    return None
+
+
+def _write_registry_license(lic_dict: dict):
+    """Lưu dữ liệu bản quyền vào Windows Registry theo người dùng hiện tại."""
+    if not winreg or sys.platform != "win32":
+        return
+    try:
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _REG_PATH) as k:
+            winreg.SetValueEx(k, _REG_KEY_NAME, 0, winreg.REG_SZ, json.dumps(lic_dict, ensure_ascii=False))
+    except Exception:
+        pass
+
+
+def _get_persistent_license_paths() -> list[Path]:
+    """Danh sách các vị trí lưu trữ bản quyền bền vững trên máy tính (AppData/Home)."""
+    paths = []
+    local_appdata = os.environ.get("LOCALAPPDATA")
+    if local_appdata:
+        paths.append(Path(local_appdata) / "PDF_AI_Marker" / _LICENSE_FILE)
+    roaming_appdata = os.environ.get("APPDATA")
+    if roaming_appdata:
+        p = Path(roaming_appdata) / "PDF_AI_Marker" / _LICENSE_FILE
+        if p not in paths:
+            paths.append(p)
+    home_p = Path.home() / ".pdf_ai_marker" / _LICENSE_FILE
+    if home_p not in paths:
+        paths.append(home_p)
+    return paths
+
+
 def _license_path() -> Path:
     """Đường dẫn file license cạnh file thực thi hoặc script."""
     exe = Path(sys.executable).resolve().parent
@@ -166,37 +217,79 @@ def get_license_status() -> dict:
     }
     """
     machine_id = _get_machine_id()
-    lic_path = _license_path()
+    local_lic_path = _license_path()
 
-    # 1. Kiểm tra Bản Quyền Chính Thức (RSA-1024)
-    if lic_path.exists():
+    # 1. Thu thập tất cả các nguồn license tiềm năng trên máy tính
+    candidate_sources: list[tuple[dict, str]] = []
+
+    # a. Thư mục cài đặt hiện tại
+    if local_lic_path.exists():
         try:
-            data = json.loads(lic_path.read_text(encoding="utf-8"))
-            lic_type = data.get("type", "MACHINE")
-            target_id = data.get("target_id", "")
-            key = data.get("key", "")
+            candidate_sources.append((json.loads(local_lic_path.read_text(encoding="utf-8")), "LOCAL"))
+        except Exception:
+            pass
 
-            if lic_type == "MACHINE" and target_id.upper() == machine_id and _verify_sig(target_id, key):
+    # b. Các thư mục hệ thống bền vững (AppData, Home)
+    for p in _get_persistent_license_paths():
+        if p.exists():
+            try:
+                candidate_sources.append((json.loads(p.read_text(encoding="utf-8")), "PERSISTENT_FILE"))
+            except Exception:
+                pass
+
+    # c. Windows Registry
+    reg_data = _read_registry_license()
+    if reg_data:
+        candidate_sources.append((reg_data, "REGISTRY"))
+
+    # Kiểm tra xem có nguồn nào chứa chữ ký RSA hợp lệ với máy này không
+    for data, src in candidate_sources:
+        try:
+            lic_type = data.get("type", "MACHINE")
+            target_id = data.get("target_id", "").strip().upper()
+            key = data.get("key", "").strip().upper()
+
+            is_valid = False
+            msg = ""
+
+            if lic_type == "MACHINE" and target_id == machine_id and _verify_sig(target_id, key):
+                is_valid = True
+                msg = "Bản quyền thương mại hợp lệ (Khóa theo máy SSD)"
+            elif lic_type == "USB":
+                connected_usbs = get_connected_usb_serials()
+                if any(target_id in usb_sn or usb_sn in target_id for usb_sn in connected_usbs):
+                    if _verify_sig(target_id, key):
+                        is_valid = True
+                        msg = "Bản quyền thương mại hợp lệ (Khóa theo USB Dongle)"
+
+            if is_valid:
+                # ĐÃ TÌM THẤY BẢN QUYỀN HỢP LỆ THEO MÁY!
+                # 1. Khôi phục lại file pdf_ai.lic vào thư mục app hiện tại nếu chưa có
+                if not local_lic_path.exists():
+                    try:
+                        local_lic_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                    except Exception:
+                        pass
+                # 2. Đồng bộ vào Windows Registry nếu chưa có
+                _write_registry_license(data)
+                # 3. Đồng bộ vào AppData nếu chưa có
+                for p in _get_persistent_license_paths():
+                    if not p.exists():
+                        try:
+                            p.parent.mkdir(parents=True, exist_ok=True)
+                            p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                        except Exception:
+                            pass
+
                 return {
                     "ok": True,
                     "status": "ACTIVE",
                     "machine_id": machine_id,
-                    "message": "Bản quyền thương mại hợp lệ (Khóa theo máy SSD)",
+                    "message": msg,
                     "days_left": 9999
                 }
-            elif lic_type == "USB":
-                connected_usbs = get_connected_usb_serials()
-                if any(target_id.upper() in usb_sn or usb_sn in target_id.upper() for usb_sn in connected_usbs):
-                    if _verify_sig(target_id, key):
-                        return {
-                            "ok": True,
-                            "status": "ACTIVE",
-                            "machine_id": machine_id,
-                            "message": "Bản quyền thương mại hợp lệ (Khóa theo USB Dongle)",
-                            "days_left": 9999
-                        }
         except Exception:
-            pass
+            continue
 
     # 2. Cơ chế DÙNG THỬ TỰ ĐỘNG (Auto-Trial 3 ngày từ lần chạy đầu)
     trial_file = _get_trial_dir() / _TRIAL_FILE
@@ -290,18 +383,35 @@ def verify_license() -> tuple[bool, str]:
 
 
 def save_license(target_id: str, key: str, lic_type: str = "MACHINE") -> bool:
-    """Lưu license vào file pdf_ai.lic sau khi kiểm tra chữ ký RSA hợp lệ."""
+    """Lưu license vào tất cả các vị trí bền vững trên máy tính sau khi kiểm tra chữ ký RSA hợp lệ."""
     if not _verify_sig(target_id, key):
         return False
 
-    lic_path = _license_path()
     payload = {
         "type": lic_type,
         "target_id": target_id.strip().upper(),
         "key": key.strip().upper(),
         "version": "3.0"
     }
-    lic_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    json_str = json.dumps(payload, ensure_ascii=False, indent=2)
+
+    # 1. Lưu vào thư mục ứng dụng hiện tại
+    try:
+        lic_path = _license_path()
+        lic_path.write_text(json_str, encoding="utf-8")
+    except Exception:
+        pass
+
+    # 2. Lưu vào các vị trí bền vững của hệ thống (AppData / Home)
+    for p in _get_persistent_license_paths():
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json_str, encoding="utf-8")
+        except Exception:
+            pass
+
+    # 3. Lưu vào Windows Registry (bền vững theo máy kể cả cài lại hay xóa folder)
+    _write_registry_license(payload)
     return True
 
 
