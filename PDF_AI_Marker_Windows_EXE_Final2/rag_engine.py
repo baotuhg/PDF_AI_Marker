@@ -12,8 +12,11 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
-# Thư mục gốc ứng dụng
-ROOT = Path(__file__).resolve().parent
+# Thư mục gốc ứng dụng (hỗ trợ cả chạy mã nguồn và đóng gói PyInstaller EXE)
+if getattr(sys, "frozen", False):
+    ROOT = Path(sys.executable).resolve().parent
+else:
+    ROOT = Path(__file__).resolve().parent
 
 
 def remove_accents(input_str: str) -> str:
@@ -318,7 +321,18 @@ class LlamaServerManager:
     """Quản lý tiến trình llama-server.exe chạy mô hình GGUF offline."""
 
     def __init__(self, llama_exe_path: str = None):
-        self.exe_path = Path(llama_exe_path or ROOT / "llama" / "llama-server.exe")
+        if llama_exe_path:
+            self.exe_path = Path(llama_exe_path)
+        else:
+            candidates = [
+                ROOT / "llama" / "llama-server.exe",
+                ROOT.parent / "llama" / "llama-server.exe",
+                Path(__file__).resolve().parent / "llama" / "llama-server.exe",
+                Path(__file__).resolve().parent.parent / "llama" / "llama-server.exe",
+                Path(sys.executable).resolve().parent / "llama" / "llama-server.exe",
+                Path(sys.executable).resolve().parent / "_internal" / "llama" / "llama-server.exe",
+            ]
+            self.exe_path = next((p for p in candidates if p.exists()), candidates[0])
         self.process = None
         self.port = 8088
         self.model_path = None
@@ -337,24 +351,32 @@ class LlamaServerManager:
         """Tự động tìm kiếm các model GGUF trong thư mục app và máy tính người dùng."""
         found = []
         # 1. Trong app: models/
-        app_models = ROOT / "models"
-        if app_models.exists():
-            for f in app_models.glob("*.gguf"):
-                if "mmproj" not in f.name.lower() and "surya" not in f.name.lower():
-                    found.append(f)
+        app_model_dirs = [
+            ROOT / "models",
+            ROOT.parent / "models",
+            Path(__file__).resolve().parent / "models",
+            Path(__file__).resolve().parent.parent / "models",
+            Path(sys.executable).resolve().parent / "models",
+        ]
+        for md in app_model_dirs:
+            if md.exists():
+                for f in md.glob("*.gguf"):
+                    if "mmproj" not in f.name.lower() and "surya" not in f.name.lower() and f not in found:
+                        found.append(f)
 
         # 2. Trong thư mục LM Studio của user nếu có
         lm_dir = Path.home() / ".lmstudio" / "models"
         if lm_dir.exists():
             for f in lm_dir.rglob("*.gguf"):
-                if "mmproj" not in f.name.lower():
+                if "mmproj" not in f.name.lower() and f not in found:
                     found.append(f)
 
         # 3. Trong thư mục Ollama / Cache nếu có
         ollama_dir = Path.home() / ".ollama" / "models"
         if ollama_dir.exists():
             for f in ollama_dir.rglob("*.gguf"):
-                found.append(f)
+                if f not in found:
+                    found.append(f)
 
         return found
 

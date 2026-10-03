@@ -59,8 +59,21 @@ class ChatWorker(QThread):
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key or 'no-key'}"
         }
+        # Tự động phát hiện model nếu chưa điền
+        target_model = (self.model_name or "").strip()
+        if not target_model and self.base_url:
+            try:
+                m_req = urllib.request.Request(f"{self.base_url}/models", headers=headers)
+                with urllib.request.urlopen(m_req, timeout=3.0) as m_resp:
+                    m_data = json.loads(m_resp.read().decode())
+                    data_list = m_data.get("data") or []
+                    if data_list and isinstance(data_list, list):
+                        target_model = data_list[0].get("id", "")
+            except Exception:
+                pass
+
         payload = {
-            "model": self.model_name,
+            "model": target_model,
             "messages": self.messages,
             "temperature": 0.2,
             "max_tokens": 2048,
@@ -95,6 +108,27 @@ class ChatWorker(QThread):
                         pass
             complete_text = "".join(full_response)
             self.finished_stream.emit(complete_text)
+        except urllib.error.HTTPError as e:
+            err_detail = ""
+            try:
+                raw = e.read().decode("utf-8", errors="ignore")
+                j = json.loads(raw)
+                if isinstance(j, dict):
+                    err_detail = j.get("error", {}).get("message") or j.get("message") or raw[:300]
+                else:
+                    err_detail = raw[:300]
+            except Exception:
+                pass
+            msg = f"Lỗi phản hồi từ máy chủ AI ({url}): {e.code} {e.reason}"
+            if err_detail:
+                msg += f"\n\nChi tiết từ server:\n{err_detail}"
+            msg += (
+                "\n\n• Gợi ý khắc phục:"
+                "\n1. Nếu dùng LM Studio: Kiểm tra xem đã nạp (Load) mô hình vào RAM/VRAM chưa."
+                "\n2. Bấm '🔍 Lấy model' ở phần Cấu hình để tự động cập nhật đúng tên model đang chạy."
+                "\n3. Hoặc chuyển sang bộ máy 'AI Offline (llama-server)' để phần mềm tự khởi động mô hình .gguf."
+            )
+            self.error_occurred.emit(msg)
         except urllib.error.URLError as e:
             self.error_occurred.emit(
                 f"Không thể kết nối đến máy chủ AI ({url}):\n{e.reason}\n\n"
@@ -238,8 +272,14 @@ class ChatWindow(QMainWindow):
 
         self.lbl_remote_model = QLabel("Model Name:")
         self.row_remote.addWidget(self.lbl_remote_model)
-        self.txt_remote_model = QLineEdit("qwen2.5-7b-instruct")
-        self.row_remote.addWidget(self.txt_remote_model)
+        self.txt_remote_model = QLineEdit()
+        self.txt_remote_model.setPlaceholderText("(Tự nhận diện hoặc điền tên)")
+        self.row_remote.addWidget(self.txt_remote_model, 1)
+
+        self.btn_fetch_model = QPushButton("🔍 Lấy model")
+        self.btn_fetch_model.setToolTip("Tự động hỏi server xem model nào đang được nạp vào RAM/VRAM")
+        self.btn_fetch_model.clicked.connect(lambda: self._fetch_remote_models(silent=False))
+        self.row_remote.addWidget(self.btn_fetch_model)
         set_layout.addLayout(self.row_remote)
         self.row_remote.setEnabled(False)
 
@@ -356,11 +396,39 @@ class ChatWindow(QMainWindow):
         if idx == 1:  # LM Studio
             self.txt_remote_url.setText("http://127.0.0.1:1234/v1")
             self.txt_remote_key.clear()
+            self._fetch_remote_models(silent=True)
         elif idx == 2:  # Ollama
             self.txt_remote_url.setText("http://127.0.0.1:11434/v1")
             self.txt_remote_key.clear()
+            self._fetch_remote_models(silent=True)
         elif idx == 3:  # Cloud
             self.txt_remote_url.setText("https://api.deepseek.com/v1")
+            if not self.txt_remote_model.text():
+                self.txt_remote_model.setText("deepseek-chat")
+
+    def _fetch_remote_models(self, silent=False):
+        url = self.txt_remote_url.text().strip()
+        if not url:
+            return
+        headers = {"Authorization": f"Bearer {self.txt_remote_key.text().strip() or 'no-key'}"}
+        try:
+            req = urllib.request.Request(f"{url}/models", headers=headers)
+            with urllib.request.urlopen(req, timeout=2.5) as resp:
+                data = json.loads(resp.read().decode())
+                data_list = data.get("data") or []
+                models = [m.get("id") for m in data_list if m.get("id")]
+                if models:
+                    self.txt_remote_model.setText(models[0])
+                    self.statusBar().showMessage(f"Đã phát hiện model từ server: {models[0]}")
+                    if not silent:
+                        QMessageBox.information(self, "Tìm thấy model", f"Server đang tải {len(models)} model.\nĐã tự động chọn: {models[0]}")
+                else:
+                    self.statusBar().showMessage("Server AI đang bật nhưng chưa có model nào được nạp.")
+                    if not silent:
+                        QMessageBox.warning(self, "Chưa nạp model", "Server AI đang chạy nhưng chưa nạp (Load) mô hình nào vào RAM/VRAM.")
+        except Exception as e:
+            if not silent:
+                QMessageBox.warning(self, "Không kết nối được", f"Không thể lấy danh mục model từ:\n{url}/models\n\n• Hãy kiểm tra xem server LM Studio/Ollama đã được BẬT chưa.\nChi tiết: {e}")
 
     def _browse_model(self):
         f, _ = QFileDialog.getOpenFileName(self, "Chọn file mô hình GGUF", "", "Mô hình GGUF (*.gguf)")
