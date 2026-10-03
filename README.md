@@ -39,11 +39,13 @@ Trong ngành xây dựng (**AEC**), việc ứng dụng Trí tuệ Nhân tạo (
   - Font chữ cũ trong hồ sơ lưu trữ: **TCVN3 (.VnTime, .VnTimeH)** và **VNI (VNI-Times)** sang chuẩn Unicode dựng sẵn.
 - **Kiểm tra chéo chữ số thông minh:** Tự động đối chiếu chéo số liệu giữa 2 bộ engine OCR độc lập. Các vị trí có sự sai lệch sẽ được đánh dấu cờ cảnh báo `⟦OCR khác: ...⟧` để kỹ sư rà soát dễ dàng, chống nhầm lẫn số liệu đo đạc / dự toán.
 
-### 2. Dựng Ma Trận Bảng Biểu Số Liệu Chuẩn Xác
+### 2. Dựng Ma Trận Bảng Biểu & Xuất Trực Tiếp Ra Excel (.xlsx)
 - Tự động phát hiện hệ lưới đường kẻ ô (Table Grid Line Detection), phục hồi nguyên vẹn ma trận hàng - cột.
 - Chuẩn hóa định dạng số: tự động nhận diện dấu phẩy/chấm thập phân kiểu Việt Nam và quốc tế.
+- **Xuất đồng thời bảng tính Excel (`bang_so_lieu.xlsx`):** Tự động kẻ viền border, in đậm hàng tiêu đề, định dạng cột số chuẩn xác để kỹ sư mở Excel là tính toán và dùng hàm `SUM()` được ngay.
 - Xuất dữ liệu đa tầng phục vụ lập trình và phân tích:
   - `noi_dung.md`: Bảng Markdown trực quan cho người đọc và AI.
+  - `bang_so_lieu.xlsx`: Bảng tính Excel chuẩn mẫu phân tab từng trang và bảng tổng hợp.
   - `bang_so_lieu.json`: Toàn bộ bảng biểu trích xuất dưới dạng mảng JSON (headers, rows, numeric values).
   - `du_lieu.json`: Metadata chi tiết từng trang, tọa độ bounding box, độ tin cậy OCR.
 
@@ -60,7 +62,15 @@ Trong ngành xây dựng (**AEC**), việc ứng dụng Trí tuệ Nhân tạo (
 - Tự động cắt tài liệu thành các phân đoạn tối ưu (~3.000 ký tự) theo ranh giới đoạn văn và trang bản vẽ.
 - Xuất file chuẩn `chia_doan.jsonl` kèm metadata nguồn gốc (*tên file, số trang, tên bản vẽ*), nạp trực tiếp vào các hệ thống Vector Database (Chroma, Qdrant, Milvus, Pinecone) hoặc các nền tảng AI Agent (LangChain, LlamaIndex, Dify).
 
-### 6. Bảo Mật Tuyệt Đối — 100% Chạy Offline
+### 6. Quét Thư Mục Hàng Loạt (Batch Folder Processing)
+- Hỗ trợ bấm nút **`📁 Chọn Thư mục (Batch)`** hoặc kéo thả trực tiếp cả Folder dự án vào cửa sổ phần mềm.
+- Tự động quét đệ quy tất cả các file PDF, Word (.docx) và Excel (.xlsx, .xlsm) trong các thư mục con để đưa vào hàng đợi xử lý liên tục.
+
+### 7. Chế Độ Dùng Thử Tự Động (Auto-Trial 3 Ngày)
+- Khách hàng mới tải về được kích hoạt ngay **3 ngày Dùng Thử Miễn Phí** với 100% tính năng mà không cần nhập key trước.
+- Trải nghiệm trọn vẹn tốc độ và độ chính xác của AI trước khi quyết định đăng ký bản quyền vĩnh viễn.
+
+### 8. Bảo Mật Tuyệt Đối — 100% Chạy Offline
 - Không kết nối Internet, không gửi dữ liệu ra bên ngoài.
 - Tận dụng sức mạnh phần cứng máy tính: tăng tốc bằng card đồ họa rời NVIDIA (CUDA) hoặc tối ưu hóa trên CPU đa nhân.
 

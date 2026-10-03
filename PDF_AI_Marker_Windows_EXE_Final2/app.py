@@ -88,11 +88,6 @@ class App(QMainWindow):
         top_row.addStretch()
 
         self.btn_license = QPushButton('🔑 Kiểm tra BẢN QUYỀN')
-        self.btn_license.setStyleSheet(
-            "QPushButton { background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe; "
-            "font-weight: 600; padding: 7px 16px; border-radius: 6px; font-size: 10.5pt; } "
-            "QPushButton:hover { background: #e0e7ff; color: #1e1b4b; }"
-        )
         self.btn_license.clicked.connect(self.show_license_info)
         top_row.addWidget(self.btn_license)
         layout.addLayout(top_row)
@@ -103,12 +98,15 @@ class App(QMainWindow):
         row = QHBoxLayout()
         self.add = QPushButton('+ Chọn file (PDF/Word/Excel)')
         self.add.clicked.connect(self.choose)
+        self.add_dir = QPushButton('📁 Chọn Thư mục (Batch)')
+        self.add_dir.clicked.connect(self.choose_folder)
         self.remove = QPushButton('Xóa danh sách')
         self.remove.clicked.connect(self.clear)
         row.addWidget(self.add)
+        row.addWidget(self.add_dir)
         row.addWidget(self.remove)
         row.addStretch()
-        self.count = QLabel('Chưa chọn file (hoặc kéo thả PDF/Word/Excel vào đây)')
+        self.count = QLabel('Chưa chọn file (hoặc kéo thả PDF/Word/Excel/Thư mục vào đây)')
         row.addWidget(self.count)
         layout.addLayout(row)
         self.listbox = QListWidget()
@@ -182,19 +180,49 @@ class App(QMainWindow):
             '  vẫn dựng bảng và khung tên; tự chuyển font cũ TCVN3 (.VnTime) và VNI (VNI-Times).\n'
             '  Chữ font SHX của AutoCAD: đọc chú thích "AutoCAD SHX Text" nếu có; nếu SHX bị vẽ\n'
             '  thành nét thì tự OCR bổ sung (~7s/trang, không dấu — cần dấu hãy dùng chế độ tiếng Việt).\n\n'
-            'Kết quả: noi_dung.md • bang_so_lieu.json • du_lieu.json • chia_doan.jsonl • can_kiem_tra.md'
+            'Kết quả: noi_dung.md • bang_so_lieu.json • bang_so_lieu.xlsx • du_lieu.json • chia_doan.jsonl • can_kiem_tra.md'
         )
         layout.addWidget(self.preview, 1)
-        # ── LICENSE CHECK ──────────────────────────────────────────────
+        # ── LICENSE CHECK & BADGE ──────────────────────────────────────
+        self.refresh_license_badge()
         ok, machine_id = verify_license()
         if not ok:
             dlg = LicenseDialog(machine_id, self)
             if dlg.exec() != LicenseDialog.Accepted:
                 sys.exit(0)
+            self.refresh_license_badge()
         # ───────────────────────────────────────────────────────────────
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.poll)
         self.timer.start(100)
+
+    def refresh_license_badge(self):
+        from license_core import get_license_status
+        st = get_license_status()
+        status = st.get("status", "EXPIRED")
+        days_left = st.get("days_left", 0)
+
+        if status == "ACTIVE":
+            self.btn_license.setText("🔑 Bản quyền: [ĐÃ KÍCH HOẠT VĨNH VIỄN]")
+            self.btn_license.setStyleSheet(
+                "QPushButton { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; "
+                "font-weight: 600; padding: 7px 16px; border-radius: 6px; font-size: 10.5pt; } "
+                "QPushButton:hover { background: #d1fae5; color: #064e3b; }"
+            )
+        elif status == "TRIAL":
+            self.btn_license.setText(f"🎁 Dùng thử: [CÒN {days_left} NGÀY] — Kích hoạt")
+            self.btn_license.setStyleSheet(
+                "QPushButton { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; "
+                "font-weight: 600; padding: 7px 16px; border-radius: 6px; font-size: 10.5pt; } "
+                "QPushButton:hover { background: #fef3c7; color: #78350f; }"
+            )
+        else:
+            self.btn_license.setText("🔒 HẾT HẠN DÙNG THỬ — Nhập key")
+            self.btn_license.setStyleSheet(
+                "QPushButton { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; "
+                "font-weight: 600; padding: 7px 16px; border-radius: 6px; font-size: 10.5pt; } "
+                "QPushButton:hover { background: #fee2e2; color: #7f1d1d; }"
+            )
 
     def _add_files(self, file_paths):
         added = 0
@@ -207,26 +235,48 @@ class App(QMainWindow):
         if self.files:
             self.count.setText(f'{len(self.files)} file')
         else:
-            self.count.setText('Chưa chọn file (hoặc kéo thả PDF/Word/Excel vào đây)')
+            self.count.setText('Chưa chọn file (hoặc kéo thả PDF/Word/Excel/Thư mục vào đây)')
         return added
 
     def choose(self):
         files, _ = QFileDialog.getOpenFileNames(self, 'Chọn file', '', 'Hồ sơ (*.pdf *.docx *.xlsx *.xlsm);;PDF (*.pdf);;Word (*.docx);;Excel (*.xlsx *.xlsm)')
         self._add_files(files)
 
+    def choose_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, 'Chọn thư mục dự án chứa hồ sơ')
+        if not folder:
+            return
+        p = Path(folder)
+        all_paths = []
+        for ext in _EXTS:
+            all_paths.extend([str(f) for f in p.rglob(f"*{ext}")])
+        if not all_paths:
+            QMessageBox.information(self, "Không tìm thấy file", f"Không tìm thấy file PDF, Word, Excel nào trong thư mục:\n{folder}")
+            return
+        added = self._add_files(all_paths)
+        self.status.setText(f"Đã quét và thêm {added} file từ thư mục dự án: {p.name}")
+
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()
-            if any(u.toLocalFile().lower().endswith(_EXTS) for u in urls):
+            if any(os.path.isdir(u.toLocalFile()) or u.toLocalFile().lower().endswith(_EXTS) for u in urls):
                 event.acceptProposedAction()
                 return
         event.ignore()
 
     def dropEvent(self, event):
         if event.mimeData().hasUrls():
-            pdf_paths = [u.toLocalFile() for u in event.mimeData().urls() if u.toLocalFile().lower().endswith(_EXTS)]
-            if pdf_paths:
-                self._add_files(pdf_paths)
+            all_paths = []
+            for u in event.mimeData().urls():
+                p = Path(u.toLocalFile())
+                if p.is_dir():
+                    for ext in _EXTS:
+                        all_paths.extend([str(f) for f in p.rglob(f"*{ext}")])
+                elif p.suffix.lower() in _EXTS:
+                    all_paths.append(str(p))
+            if all_paths:
+                added = self._add_files(all_paths)
+                self.status.setText(f"Đã kéo thả và thêm {added} file vào danh sách.")
                 event.acceptProposedAction()
                 return
         event.ignore()
@@ -234,7 +284,7 @@ class App(QMainWindow):
     def clear(self):
         self.files.clear()
         self.listbox.clear()
-        self.count.setText('Chưa chọn file (hoặc kéo thả PDF/Word/Excel vào đây)')
+        self.count.setText('Chưa chọn file (hoặc kéo thả PDF/Word/Excel/Thư mục vào đây)')
 
     def output(self):
         folder = QFileDialog.getExistingDirectory(self, 'Chọn thư mục')
@@ -255,6 +305,7 @@ class App(QMainWindow):
         ok, machine_id = verify_license()
         dlg = LicenseDialog(machine_id, self)
         dlg.exec()
+        self.refresh_license_badge()
 
     def closeEvent(self, event):
         if self.busy:
@@ -265,6 +316,11 @@ class App(QMainWindow):
             event.accept()
 
     def start(self):
+        ok, machine_id = verify_license()
+        if not ok:
+            QMessageBox.warning(self, "Hết hạn bản quyền", "Thời hạn dùng thử miễn phí đã hết hoặc máy chưa được kích hoạt.\nVui lòng kích hoạt bản quyền để tiếp tục.")
+            self.show_license_info()
+            return
         if not self.files:
             QMessageBox.information(self, 'Chọn PDF', 'Hãy chọn ít nhất một file PDF/Word/Excel.')
             return
@@ -274,7 +330,7 @@ class App(QMainWindow):
         self.busy = True
         self.cancel.clear()
         self.progress.setRange(0, 0)
-        for control in [self.run, self.add, self.remove, self.out, self.folder, self.mode, self.password, self.pages]:
+        for control in [self.run, self.add, self.add_dir, self.remove, self.out, self.folder, self.mode, self.password, self.pages]:
             control.setEnabled(False)
         self.stop.setEnabled(True)
         mode = MODES[self.mode.currentIndex()][0]
@@ -327,7 +383,7 @@ class App(QMainWindow):
                 elif event[0] == 'done':
                     self.busy = False
                     self.progress.setRange(0, 100)
-                    for control in [self.run, self.add, self.remove, self.out, self.folder, self.mode, self.password, self.pages]:
+                    for control in [self.run, self.add, self.add_dir, self.remove, self.out, self.folder, self.mode, self.password, self.pages]:
                         control.setEnabled(True)
                     self.stop.setEnabled(False)
                     self.password.clear()

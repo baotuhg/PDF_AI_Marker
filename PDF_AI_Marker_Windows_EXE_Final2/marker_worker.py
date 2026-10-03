@@ -399,6 +399,148 @@ def review_markdown(pages):
     return "\n".join(out) if len(out) > 4 else "Không có mục nào cần đối chiếu.\n"
 
 
+def export_tables_to_excel(tables, excel_path: Path):
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+    except ImportError:
+        return
+
+    wb = openpyxl.Workbook()
+    default_sheet = wb.active
+
+    if not tables:
+        ws = wb.create_sheet(title="Thông báo")
+        ws.cell(row=1, column=1, value="Không tìm thấy bảng số liệu kẻ ô trong tài liệu này.")
+        wb.remove(default_sheet)
+        wb.save(str(excel_path))
+        return
+
+    # Master Sheet: Tổng hợp tất cả bảng
+    ws_master = wb.create_sheet(title="Tổng hợp tất cả bảng")
+    wb.remove(default_sheet)
+
+    title_font = Font(name="Calibri", size=12, bold=True, color="FFFFFF")
+    title_fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="2F5597", end_color="2F5597", fill_type="solid")
+    meta_font = Font(name="Calibri", size=10, italic=True, color="595959")
+    zebra_fill = PatternFill(start_color="F2F5F9", end_color="F2F5F9", fill_type="solid")
+    
+    thin_border = Border(
+        left=Side(style="thin", color="D9D9D9"),
+        right=Side(style="thin", color="D9D9D9"),
+        top=Side(style="thin", color="D9D9D9"),
+        bottom=Side(style="thin", color="D9D9D9")
+    )
+    center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left_align = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    right_align = Alignment(horizontal="right", vertical="center")
+
+    def write_table_block(ws, tbl, start_row):
+        r = start_row
+        p_num = tbl.get("page", 1)
+        sh_code = tbl.get("sheet") or ""
+        sh_title = tbl.get("sheet_title") or ""
+        t_title = tbl.get("title") or "Bảng số liệu"
+        
+        headers = tbl.get("header") or []
+        body_rows = tbl.get("rows") or []
+        values = tbl.get("values") or []
+        
+        ncol = max(len(headers), max((len(row) for row in body_rows), default=1))
+        
+        # 1. Title Banner
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncol)
+        cell = ws.cell(row=r, column=1, value=f"📊 {t_title.upper()}")
+        cell.font = title_font
+        cell.fill = title_fill
+        cell.alignment = Alignment(horizontal="left", vertical="center")
+        ws.row_dimensions[r].height = 26
+        r += 1
+        
+        # 2. Metadata subtitle
+        meta_text = f"Trang {p_num}"
+        if sh_code:
+            meta_text += f" | Bản vẽ: {sh_code}"
+        if sh_title:
+            meta_text += f" - {sh_title}"
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncol)
+        meta_cell = ws.cell(row=r, column=1, value=meta_text)
+        meta_cell.font = meta_font
+        meta_cell.alignment = Alignment(horizontal="left", vertical="center")
+        ws.row_dimensions[r].height = 18
+        r += 1
+        
+        # 3. Headers
+        if headers:
+            for c_idx, h_text in enumerate(headers, 1):
+                c = ws.cell(row=r, column=c_idx, value=h_text)
+                c.font = header_font
+                c.fill = header_fill
+                c.alignment = center_align
+                c.border = thin_border
+            ws.row_dimensions[r].height = 24
+            r += 1
+            
+        # 4. Data Rows
+        for r_idx, row_data in enumerate(body_rows):
+            is_zebra = (r_idx % 2 == 1)
+            row_vals = values[r_idx] if r_idx < len(values) else []
+            for c_idx in range(1, ncol + 1):
+                val_raw = row_data[c_idx - 1] if c_idx - 1 < len(row_data) else ""
+                num_val = row_vals[c_idx - 1] if c_idx - 1 < len(row_vals) else None
+                
+                c = ws.cell(row=r, column=c_idx)
+                if num_val is not None and isinstance(num_val, (int, float)):
+                    c.value = num_val
+                    c.alignment = right_align
+                    c.number_format = "#,##0.00" if isinstance(num_val, float) and not num_val.is_integer() else "#,##0"
+                else:
+                    c.value = val_raw
+                    c.alignment = left_align
+                    
+                c.border = thin_border
+                if is_zebra:
+                    c.fill = zebra_fill
+            ws.row_dimensions[r].height = 20
+            r += 1
+            
+        return r + 2
+
+    curr_row = 1
+    for tbl in tables:
+        curr_row = write_table_block(ws_master, tbl, curr_row)
+
+    for col in ws_master.columns:
+        max_len = 0
+        col_letter = get_column_letter(col[0].column)
+        for cell in col:
+            if cell.value:
+                s = str(cell.value)
+                if len(s) > max_len and len(s) < 60:
+                    max_len = len(s)
+        ws_master.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+    for idx, tbl in enumerate(tables[:20], 1):
+        p_num = tbl.get("page", idx)
+        sheet_name = f"Trang_{p_num}_B{idx}"[:31]
+        ws_sub = wb.create_sheet(title=sheet_name)
+        write_table_block(ws_sub, tbl, 1)
+        for col in ws_sub.columns:
+            max_len = 0
+            col_letter = get_column_letter(col[0].column)
+            for cell in col:
+                if cell.value:
+                    s = str(cell.value)
+                    if len(s) > max_len and len(s) < 60:
+                        max_len = len(s)
+            ws_sub.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+    wb.save(str(excel_path))
+
+
 def write_outputs(result, mode, source, total, pages, chunks, total_sec, max_chars):
     from layout_reconstructor import format_full_markdown_document
     v3 = mode in ENGINE_NAMES
@@ -433,6 +575,10 @@ def write_outputs(result, mode, source, total, pages, chunks, total_sec, max_cha
                    "sheet_title": (p.get("metadata") or {}).get("ten_ban_ve"), **t}
                   for p in pages for t in (p.get("tables") or [])]
         (result / "bang_so_lieu.json").write_text(json.dumps(tables, ensure_ascii=False, indent=2), encoding="utf-8")
+        try:
+            export_tables_to_excel(tables, result / "bang_so_lieu.xlsx")
+        except Exception as e:
+            emit("progress", message=f"[Cảnh báo xuất Excel: {e}]")
         (result / "can_kiem_tra.md").write_text(review_markdown(pages), encoding="utf-8")
     (result / "goi_y_cho_AI.txt").write_text(AI_GUIDE, encoding="utf-8")
     if v3:
@@ -440,6 +586,7 @@ def write_outputs(result, mode, source, total, pages, chunks, total_sec, max_cha
                  "noi_dung.txt: văn bản thuần theo trang.\n"
                  "du_lieu.json: dữ liệu đầy đủ theo trang (metadata khung tên, bảng, chữ độ tin cậy thấp).\n"
                  "bang_so_lieu.json: TẤT CẢ bảng số liệu, có header/rows/values (số đã chuẩn hóa).\n"
+                 "bang_so_lieu.xlsx: BẢNG TÍNH EXCEL chuẩn mẫu (kẻ ô viền, định dạng số, in đậm tiêu đề).\n"
                  "chia_doan.jsonl: các đoạn ~3000 ký tự kèm nguồn/trang/bản vẽ để nạp RAG.\n"
                  "can_kiem_tra.md: danh sách chữ/số cần đối chiếu PDF gốc.\n"
                  "goi_y_cho_AI.txt: hướng dẫn đọc cho AI (định dạng số, ký hiệu).\n")

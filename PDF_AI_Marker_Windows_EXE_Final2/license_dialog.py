@@ -37,15 +37,19 @@ class LicenseDialog(QDialog):
         layout.setContentsMargins(28, 22, 28, 22)
 
         # Header & Trạng thái bản quyền
-        is_active, _ = verify_license()
-        if is_active:
-            title = QLabel("🔑  Bản quyền PDF AI Marker v3 — [ĐÃ KÍCH HOẠT]")
+        from license_core import get_license_status
+        st = get_license_status()
+        status = st.get("status", "EXPIRED")
+        days_left = st.get("days_left", 0)
+
+        if status == "ACTIVE":
+            title = QLabel("🔑  Bản quyền PDF AI Marker v3 — [ĐÃ KÍCH HOẠT VĨNH VIỄN]")
             title.setFont(QFont("Segoe UI", 14, QFont.Bold))
             title.setStyleSheet("color: #1e3a8a;")
             layout.addWidget(title)
 
             status_notice = QLabel(
-                "🎉 <b>Phần mềm ĐÃ ĐƯỢC KÍCH HOẠT BẢN QUYỀN HỢP LỆ!</b><br>"
+                "🎉 <b>Phần mềm ĐÃ ĐƯỢC KÍCH HOẠT BẢN QUYỀN THƯƠNG MẠI HỢP LỆ!</b><br>"
                 "Tác giả: <b>Nguyễn Bảo Tú (23HG)</b>  |  Phiên bản: <b>3.0 Commercial</b><br>"
                 "<i>Trạng thái: Hoạt động đầy đủ tính năng. Bạn có thể gia hạn hoặc đổi sang USB nếu cần.</i>"
             )
@@ -55,19 +59,37 @@ class LicenseDialog(QDialog):
                 "border-radius: 6px; padding: 10px 14px; font-size: 10pt;"
             )
             layout.addWidget(status_notice)
-        else:
-            title = QLabel("🔑  Kích hoạt Bản quyền PDF AI Marker v3")
+        elif status == "TRIAL":
+            title = QLabel(f"🎁  Bản quyền PDF AI Marker v3 — [DÙNG THỬ CÒN {days_left} NGÀY]")
             title.setFont(QFont("Segoe UI", 14, QFont.Bold))
+            title.setStyleSheet("color: #b45309;")
+            layout.addWidget(title)
+
+            status_notice = QLabel(
+                f"🎁 <b>BẠN ĐANG TRONG THỜI GIAN DÙNG THỬ MIỄN PHÍ ({days_left} ngày còn lại)!</b><br>"
+                "Tác giả: <b>Nguyễn Bảo Tú (23HG)</b>  |  Trải nghiệm đầy đủ 100% tính năng AI và OCR.<br>"
+                "Mã máy (Machine ID) <b>đã tự động được sao chép</b>. Bạn có thể mua key bất kỳ lúc nào để mở khóa vĩnh viễn."
+            )
+            status_notice.setTextFormat(Qt.RichText)
+            status_notice.setStyleSheet(
+                "background: #fef3c7; color: #92400e; border: 1px solid #fde68a; "
+                "border-radius: 6px; padding: 10px 14px; font-size: 10pt;"
+            )
+            layout.addWidget(status_notice)
+        else:
+            title = QLabel("🔒  Kích hoạt Bản quyền PDF AI Marker v3")
+            title.setFont(QFont("Segoe UI", 14, QFont.Bold))
+            title.setStyleSheet("color: #991b1b;")
             layout.addWidget(title)
 
             copy_notice = QLabel(
-                "✅ <b>Đã tự động sao chép Mã máy vào bộ nhớ tạm (Clipboard)!</b><br>"
+                "⚠️ <b>Thời hạn dùng thử miễn phí đã kết thúc hoặc máy chưa kích hoạt key!</b><br>"
                 "Tác giả: <b>Nguyễn Bảo Tú (23HG)</b><br>"
-                "Bạn chỉ cần mở Zalo/Email và ấn <b>Ctrl + V</b> để gửi mã kích hoạt."
+                "Mã máy (Machine ID) <b>đã tự động được sao chép vào Clipboard</b>. Mở Zalo/Email ấn <b>Ctrl + V</b> để gửi mã đăng ký key."
             )
             copy_notice.setTextFormat(Qt.RichText)
             copy_notice.setStyleSheet(
-                "background: #e8f5e9; color: #1b5e20; border: 1px solid #c8e6c9; "
+                "background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; "
                 "border-radius: 6px; padding: 10px 14px; font-size: 10pt;"
             )
             layout.addWidget(copy_notice)

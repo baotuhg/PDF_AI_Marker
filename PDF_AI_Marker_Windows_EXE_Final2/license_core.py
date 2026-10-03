@@ -133,41 +133,160 @@ def _license_path() -> Path:
     return Path(__file__).resolve().parent / _LICENSE_FILE
 
 
-def verify_license() -> tuple[bool, str]:
+import datetime
+
+_TRIAL_FILE = ".pdf_ai_trial"
+_TRIAL_SALT = "PDF_AI_MARKER_V3_TRIAL_PROTECTION_2026_23HG"
+
+
+def _get_trial_dir() -> Path:
+    appdata = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+    if appdata:
+        p = Path(appdata) / "PDF_AI_Marker"
+    else:
+        p = Path.home() / ".pdf_ai_marker"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _sign_trial(machine_id: str, start_iso: str) -> str:
+    raw = f"{machine_id}::{start_iso}::{_TRIAL_SALT}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def get_license_status() -> dict:
     """
-    Kiểm tra bản quyền hợp lệ.
-    Hỗ trợ 2 chế độ:
-      1. Khóa theo máy (SSD).
-      2. Khóa theo USB Dongle (Cắm USB đăng ký vào máy nào thì máy đó chạy được).
+    Trả về trạng thái bản quyền chi tiết:
+    {
+       "ok": bool,            # True nếu được phép chạy (Bản quyền thật HOẶC Dùng thử hợp lệ)
+       "status": str,         # "ACTIVE" | "TRIAL" | "EXPIRED"
+       "machine_id": str,     # Mã máy
+       "message": str,        # Thông báo trạng thái
+       "days_left": int       # Số ngày dùng thử còn lại
+    }
     """
     machine_id = _get_machine_id()
     lic_path = _license_path()
 
-    if not lic_path.exists():
-        return False, machine_id
+    # 1. Kiểm tra Bản Quyền Chính Thức (RSA-1024)
+    if lic_path.exists():
+        try:
+            data = json.loads(lic_path.read_text(encoding="utf-8"))
+            lic_type = data.get("type", "MACHINE")
+            target_id = data.get("target_id", "")
+            key = data.get("key", "")
+
+            if lic_type == "MACHINE" and target_id.upper() == machine_id and _verify_sig(target_id, key):
+                return {
+                    "ok": True,
+                    "status": "ACTIVE",
+                    "machine_id": machine_id,
+                    "message": "Bản quyền thương mại hợp lệ (Khóa theo máy SSD)",
+                    "days_left": 9999
+                }
+            elif lic_type == "USB":
+                connected_usbs = get_connected_usb_serials()
+                if any(target_id.upper() in usb_sn or usb_sn in target_id.upper() for usb_sn in connected_usbs):
+                    if _verify_sig(target_id, key):
+                        return {
+                            "ok": True,
+                            "status": "ACTIVE",
+                            "machine_id": machine_id,
+                            "message": "Bản quyền thương mại hợp lệ (Khóa theo USB Dongle)",
+                            "days_left": 9999
+                        }
+        except Exception:
+            pass
+
+    # 2. Cơ chế DÙNG THỬ TỰ ĐỘNG (Auto-Trial 3 ngày từ lần chạy đầu)
+    trial_file = _get_trial_dir() / _TRIAL_FILE
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    if not trial_file.exists():
+        start_iso = now.isoformat()
+        sig = _sign_trial(machine_id, start_iso)
+        payload = {
+            "machine_id": machine_id,
+            "start": start_iso,
+            "sig": sig,
+            "trial_days": 3
+        }
+        try:
+            trial_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            if sys.platform == "win32":
+                ctypes.windll.kernel32.SetFileAttributesW(str(trial_file), 2)
+        except Exception:
+            pass
+        return {
+            "ok": True,
+            "status": "TRIAL",
+            "machine_id": machine_id,
+            "message": "Đang trong thời gian DÙNG THỬ MIỄN PHÍ (Còn 3 ngày)",
+            "days_left": 3
+        }
 
     try:
-        data = json.loads(lic_path.read_text(encoding="utf-8"))
-        lic_type = data.get("type", "MACHINE")
-        target_id = data.get("target_id", "")
-        key = data.get("key", "")
+        tdata = json.loads(trial_file.read_text(encoding="utf-8"))
+        t_mid = tdata.get("machine_id", "")
+        t_start = tdata.get("start", "")
+        t_sig = tdata.get("sig", "")
+
+        if t_mid != machine_id or _sign_trial(machine_id, t_start) != t_sig:
+            return {
+                "ok": False,
+                "status": "EXPIRED",
+                "machine_id": machine_id,
+                "message": "Dữ liệu dùng thử không hợp lệ. Vui lòng kích hoạt bản quyền.",
+                "days_left": 0
+            }
+
+        start_dt = datetime.datetime.fromisoformat(t_start)
+        elapsed_sec = (now - start_dt).total_seconds()
+
+        if elapsed_sec < -3600:
+            return {
+                "ok": False,
+                "status": "EXPIRED",
+                "machine_id": machine_id,
+                "message": "Phát hiện thời gian hệ thống bị thay đổi. Vui lòng kích hoạt bản quyền.",
+                "days_left": 0
+            }
+
+        trial_duration = 3 * 86400
+        if elapsed_sec < trial_duration:
+            remain_sec = trial_duration - elapsed_sec
+            days_left = max(1, int(remain_sec // 86400) + (1 if remain_sec % 86400 > 0 else 0))
+            return {
+                "ok": True,
+                "status": "TRIAL",
+                "machine_id": machine_id,
+                "message": f"Dùng thử miễn phí còn {days_left} ngày",
+                "days_left": days_left
+            }
+        else:
+            return {
+                "ok": False,
+                "status": "EXPIRED",
+                "machine_id": machine_id,
+                "message": "Đã hết thời hạn dùng thử 3 ngày. Vui lòng mua bản quyền để tiếp tục.",
+                "days_left": 0
+            }
     except Exception:
-        return False, machine_id
+        return {
+            "ok": False,
+            "status": "EXPIRED",
+            "machine_id": machine_id,
+            "message": "Hết hạn dùng thử. Vui lòng mua bản quyền.",
+            "days_left": 0
+        }
 
-    # 1. Chế độ khóa theo Máy (SSD)
-    if lic_type == "MACHINE":
-        if target_id.upper() == machine_id and _verify_sig(target_id, key):
-            return True, machine_id
 
-    # 2. Chế độ khóa theo USB Dongle (giống HTTKD)
-    elif lic_type == "USB":
-        # Kiểm tra xem USB đăng ký có đang được cắm vào máy không
-        connected_usbs = get_connected_usb_serials()
-        if any(target_id.upper() in usb_sn or usb_sn in target_id.upper() for usb_sn in connected_usbs):
-            if _verify_sig(target_id, key):
-                return True, machine_id
-
-    return False, machine_id
+def verify_license() -> tuple[bool, str]:
+    """
+    Kiểm tra bản quyền hợp lệ (bao gồm cả Bản quyền thật và Dùng thử Auto-Trial).
+    """
+    st = get_license_status()
+    return st["ok"], st["machine_id"]
 
 
 def save_license(target_id: str, key: str, lic_type: str = "MACHINE") -> bool:
