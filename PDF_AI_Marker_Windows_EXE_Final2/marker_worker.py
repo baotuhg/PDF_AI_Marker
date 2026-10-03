@@ -17,10 +17,33 @@ def detect_gpu():
         import torch
         if torch.cuda.is_available():
             name = torch.cuda.get_device_name(0)
+            # Tối ưu hóa vi kiến trúc Tensor Cores (Ada Lovelace RTX 40-series & Ampere RTX 30-series)
+            try:
+                torch.backends.cudnn.benchmark = True
+                torch.set_float32_matmul_precision('high')
+                torch.backends.cuda.matmul.allow_tf32 = True
+                torch.backends.cudnn.allow_tf32 = True
+            except Exception:
+                pass
             return "cuda", name, "99"
-    except Exception as e:
-        emit("progress", message=f"[GPU Detect Error: {e}]")
+    except Exception:
         pass
+
+    # Fallback: kiểm tra trực tiếp qua llama-server.exe --list-devices
+    try:
+        import subprocess
+        llama_bin = ROOT / "llama/llama-server.exe"
+        if llama_bin.exists():
+            r = subprocess.run([str(llama_bin), "--list-devices"],
+                               capture_output=True, text=True, timeout=3,
+                               creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            if "CUDA" in r.stdout:
+                lines = [ln.strip() for ln in r.stdout.splitlines() if "CUDA" in ln]
+                name = lines[0].split(":", 1)[-1].strip() if lines else "NVIDIA GPU"
+                return "cuda", name, "99"
+    except Exception:
+        pass
+
     return "cpu", None, "0"
 
 def configure(session):
@@ -28,10 +51,18 @@ def configure(session):
     for path in [cache, session, ROOT / "models"]:
         path.mkdir(parents=True, exist_ok=True)
 
-    device, gpu_name, ngl = detect_gpu()
+    # Đưa các thư viện CUDA (llama và torch/lib) vào PATH để DLL loader luôn ưu tiên nạp
+    llama_dir = ROOT / "llama"
     torch_lib = ROOT / "engine/Lib/site-packages/torch/lib"
+    path_addons = []
+    if llama_dir.exists():
+        path_addons.append(str(llama_dir))
     if torch_lib.exists():
-        os.environ["PATH"] = str(torch_lib) + os.pathsep + os.environ.get("PATH", "")
+        path_addons.append(str(torch_lib))
+    if path_addons:
+        os.environ["PATH"] = os.pathsep.join(path_addons) + os.pathsep + os.environ.get("PATH", "")
+
+    device, gpu_name, ngl = detect_gpu()
 
     os.environ.update({
         "PYTHONUTF8": "1",
@@ -44,6 +75,8 @@ def configure(session):
         "SURYA_GGUF_LOCAL_MMPROJ_PATH": str(ROOT / "models/surya-2-mmproj.gguf"),
         "LLAMA_CPP_BINARY": str(ROOT / "llama/llama-server.exe"),
         "LLAMA_CPP_NGL": ngl,
+        "LLAMA_ARG_FLASH_ATTN": "on" if device == "cuda" else "off",
+        "CUDA_MODULE_LOADING": "LAZY",
         "SURYA_INFERENCE_PARALLEL": "4" if device == "cuda" else "1",
         "SURYA_INFERENCE_KEEP_ALIVE": "true",       # keep server warm between pages
         "SURYA_INFERENCE_TIMEOUT_SECONDS": "1800",
@@ -53,7 +86,7 @@ def configure(session):
         "OMP_NUM_THREADS": "8" if device == "cuda" else "4",
     })
     if device == "cuda" and gpu_name:
-        emit("progress", message=f"⚡ GPU: {gpu_name} — OCR sẽ nhanh hơn đáng kể!")
+        emit("progress", message=f"⚡ GPU Tăng tốc: {gpu_name} (Tensor Cores + Flash Attention)")
 
     for name in ["SURYA_INFERENCE_URL", "FAST_LAYOUT_SERVER_URL",
                  "OCR_ERROR_SERVER_URL", "DETECTOR_SERVER_URL"]:
