@@ -228,9 +228,9 @@ class AECTableAuditor:
             return
 
         col_mark = cls._find_col(headers, ["KY HIEU", "TEN THANH", "SO HIEU", "MARK", "STT"])
-        col_dia = cls._find_col(headers, ["DUONG KINH", "PHI", "FI", "DIA", "D (MM)"])
-        col_len = cls._find_col(headers, ["CHIEU DAI", "CD (MM)", "CD (M)", "LENGTH"])
-        col_qty = cls._find_col(headers, ["SO LUONG", "SO THANH", "QTY", "SL"])
+        col_dia = cls._find_col(headers, ["DUONG KINH", "DRONG KINH", "DK", "PHI", "FI", "DIA", "D (MM)", "D(MM)", "D="])
+        col_len = cls._find_col(headers, ["CHIEU DAI", "CHIEU DI", "CD (MM)", "CD(MM)", "CD (M)", "LENGTH", "L (MM)", "L(MM)"])
+        col_qty = cls._find_col(headers, ["SO LUONG", "SO THANH", "SOLURGNG", "QTY", "SL"])
         col_tot_len = cls._find_col(headers, ["TONG CHIEU DAI", "TONG CD", "TOTAL LENGTH"])
         col_weight = cls._find_col(headers, ["TRONG LUONG", "KHOI LUONG", "WEIGHT", "KG"])
 
