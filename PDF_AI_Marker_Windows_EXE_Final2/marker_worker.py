@@ -29,6 +29,9 @@ def configure(session):
         path.mkdir(parents=True, exist_ok=True)
 
     device, gpu_name, ngl = detect_gpu()
+    torch_lib = ROOT / "engine/Lib/site-packages/torch/lib"
+    if torch_lib.exists():
+        os.environ["PATH"] = str(torch_lib) + os.pathsep + os.environ.get("PATH", "")
 
     os.environ.update({
         "PYTHONUTF8": "1",

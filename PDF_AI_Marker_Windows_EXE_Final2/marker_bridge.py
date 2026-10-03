@@ -29,6 +29,9 @@ def convert(source,destination,mode='auto',password='',chunk_size=3000,
     env['PYTHONIOENCODING']='utf-8'
     site_packages=ROOT/'engine/Lib/site-packages'
     env['PYTHONPATH']=(str(ROOT)+os.pathsep+str(site_packages)) if site_packages.exists() else str(ROOT)
+    torch_lib=ROOT/'engine/Lib/site-packages/torch/lib'
+    if torch_lib.exists():
+        env['PATH']=str(torch_lib)+os.pathsep+env.get('PATH','')
     flags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0
     # A frozen PyInstaller process changes the DLL search directory. Restore
     # Windows defaults for the external Marker interpreter, then restore GUI.
