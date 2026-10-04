@@ -18,6 +18,13 @@ import unicodedata
 from typing import Dict, List, Tuple, Any, Optional
 from datetime import datetime
 
+try:
+    from app_log import get_logger
+    log = get_logger(__name__)
+except Exception:                      # app_log luôn import được; phòng xa vẫn không làm vỡ engine
+    import logging
+    log = logging.getLogger("pdf_ai.experience")
+
 
 class AECExperienceEngine:
     """
@@ -59,7 +66,7 @@ class AECExperienceEngine:
                         if k in saved:
                             self.knowledge[k] = saved[k]
             except Exception as e:
-                print(f"[ExperienceEngine] Cảnh báo đọc DB: {e}")
+                log.warning("Đọc experience_db lỗi: %s", e)
 
     def save_db(self):
         """Lưu trữ dữ liệu kinh nghiệm xuống tệp JSON."""
@@ -68,7 +75,7 @@ class AECExperienceEngine:
             with self.db_path.open("w", encoding="utf-8") as f:
                 json.dump(self.knowledge, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"[ExperienceEngine] Lỗi ghi DB: {e}")
+            log.warning("Ghi experience_db lỗi: %s", e)
 
     # ─────────────────────────────────────────────────────────────────────────
     # HÀM PHỤ TRỢ TRÍCH XUẤT TRI THỨC THẬT TỪ NỘI DUNG
@@ -274,7 +281,7 @@ class AECExperienceEngine:
             if changed:
                 vn_diacritics._DEFAULT_RESTORER = None   # dựng lại lười ở lần restore kế tiếp
         except Exception as e:
-            print(f"[ExperienceEngine] Lỗi đồng bộ vn_diacritics: {e}")
+            log.warning("Đồng bộ vn_diacritics lỗi: %s", e)
 
         try:
             import table_agent
@@ -287,7 +294,7 @@ class AECExperienceEngine:
                     table_agent.QTY_ALIASES.add(alias)
                 self._injected_aliases.add(alias)
         except Exception as e:
-            print(f"[ExperienceEngine] Lỗi đồng bộ table_agent: {e}")
+            log.warning("Đồng bộ table_agent lỗi: %s", e)
 
     # ─────────────────────────────────────────────────────────────────────────
     # HỌC CÓ GIÁM SÁT: SỬA LỖI OCR TỪ NGƯỜI DÙNG (du_lieu raw ↔ chữ người sửa)
@@ -461,7 +468,7 @@ class AECExperienceEngine:
                     agg["numeric"] += st.get("numeric", 0)
                     agg["skipped"] += st.get("skipped", 0)
         except Exception as e:
-            print(f"[ExperienceEngine] scan_and_learn lỗi: {e}")
+            log.warning("scan_and_learn lỗi: %s", e)
         return agg
 
     def apply_corrections_to_text(self, text: str) -> str:

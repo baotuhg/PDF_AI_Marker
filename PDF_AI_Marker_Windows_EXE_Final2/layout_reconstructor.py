@@ -27,6 +27,13 @@ from bisect import bisect_right
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+try:
+    from app_log import get_logger
+    log = get_logger(__name__)
+except Exception:
+    import logging
+    log = logging.getLogger("pdf_ai.layout")
+
 from vn_refine import strip_accents, ALT_OPEN
 
 LOW_CONFIDENCE = 0.75
@@ -34,138 +41,137 @@ LOW_CONFIDENCE = 0.75
 # Bộ quy tắc khôi phục dấu / tách từ dính chùm cho chữ RapidOCR (không dấu).
 # Chỉ gồm các phép khôi phục dấu thuần túy, KHÔNG đổi nghĩa câu chữ.
 VIETNAMESE_AEC_RULES = [
-    # Gói thầu / Dự án & Pháp lý
-    (r"\bGO1\s+THAU\b", "GÓI THẦU"),
-    (r"\bTHIET\s*KEBVTC\b", "THIẾT KẾ BVTC"),
-    (r"\bBANQUANLYDUANDAU\s*TUXAY\s*DUNG\b", "BAN QUẢN LÝ DỰ ÁN ĐẦU TƯ XÂY DỰNG"),
-
-    # Tách từ bị dính chùm trong thuyết minh
-    (r"\bBérong\b", "Bề rộng"),
-    (r"\bBerong\b", "Bề rộng"),
-    (r"\bBe\s*rong\b", "Bề rộng"),
-    (r"\bGoicaucao\s*su\b", "Gối cầu cao su"),
-    (r"\bcotban\s*theploai\b", "cốt bản thép loại"),
-    (r"\btheploai\b", "thép loại"),
-    (r"\bmat\s*do\s*ma\s*([0-9]+)", r"mật độ mạ \1"),
-    (r"\bdamTbangcacthanhdinhvivavit\b", "dầm T bằng các thanh định vị và vít"),
-    (r"\bchiu\s+lyrc\b", "chịu lực"),
-    (r"\bchiu\s+luc\b", "chịu lực"),
-    (r"\bchju\s+luc\b", "chịu lực"),
-    (r"\bchju\s+dong\s+dat\b", "chịu động đất"),
-    (r"\bchju\b", "chịu"),
-    (r"lanrcay,?\s*thc\s*vat", "lẫn rễ cây, thực vật"),
-    (r"\btiu\s+tren\s+xuong\b", "từ trên xuống"),
-    (r"\bvra-nhe\b", "vừa - nhẹ"),
-    (r"\bdamBTCT\b", "dầm BTCT"),
-    (r"\bKetcau\b", "Kết cấu"),
-    (r"\bSodonhip\b", "Sơ đồ nhịp"),
-    (r"\bgira\s+cac\s+dam\b", "giữa các dầm"),
-    (r"\bb6\s+tri\b", "bố trí"),
-    (r"\bbo\s*tri\b", "bố trí"),
-    (r"\bBanmat\s+cau\s+bangbe\s+tong\s+cot\s+thep\s+do\s+tai\s+choco\s+chieu\s+daynhonhat\b", "Bản mặt cầu bằng bê tông cốt thép đổ tại chỗ có chiều dày nhỏ nhất"),
-    (r"\btiepxucvoinendatcanphaiquet\s+21opnhua\s+duongnong2kg/m2\b", "tiếp xúc với nền đất cần phải quét 2 lớp nhựa đường nóng 2kg/m2"),
-    (r"\bM6\s+cau:M6bang\s+be\s+tong\s+cot\s+thep\s+do\s+tai\s+cho,kieu\s+chu\s+U\b", "Mố cầu: Mố bằng bê tông cốt thép đổ tại chỗ, kiểu chữ U"),
-    (r"\bdurong\s+be\s+tong\b", "đường bê tông"),
-    (r"\bdurong\s+BT\b", "đường BT"),
-    (r"\bdurong\s+o\s+to\b", "đường ô tô"),
-    (r"\bdurong\b", "đường"),
-    (r"\bdugclienketvoi\b", "được liên kết với"),
-    (r"\bdugc\b", "được"),
-    (r"\blienketvoi\b", "liên kết với"),
-    (r"\btir\b", "từ"),
-    (r"\bChu\s+dau\s+tur\b", "Chủ đầu tư"),
-    (r"\blang\s+nhya\b", "láng nhựa"),
-    (r"\bdjaky\s+thuat\b", "địa kỹ thuật"),
-    (r"\bquy\s+chuanky\s+thuatQuocgia\b", "Quy chuẩn kỹ thuật Quốc gia"),
-    (r"\bvemang\s+phanquang\b", "về màng phản quang"),
-    (r"\bDACDIEMDIACHAT\b", "ĐẶC ĐIỂM ĐỊA CHẤT"),
-    (r"\bGIAIPHAPTHIETKE\b", "GIẢI PHÁP THIẾT KẾ"),
-    (r"\bPhan cau\b", "Phần cầu"),
-    (r"\bVat lieu sir dung\b", "Vật liệu sử dụng"),
-    (r"\bsir dung\b", "sử dụng"),
-    (r"\btuong duong\b", "tương đương"),
-    (r"\bgita nhip\b", "giữa nhịp"),
-    (r"\b1op phong nuoc\b", "lớp phòng nước"),
-    (r"\b1op da dam\b", "lớp đá dăm"),
-    (r"\bda damdemday10cm\b", "đá dăm đệm dày 10cm"),
-    (r"\bmongam vao da goc\b", "móng ngàm vào đá gốc"),
-    (r"\bmongam\b", "móng ngàm"),
-    (r"\bdagoc\b", "đá gốc"),
-    (r"\bda goc\b", "đá gốc"),
-    (r"\bdap chon loc dam chat\b", "đắp chọn lọc đầm chặt"),
-    (r"\bchan khay gia co tr non\b", "chân khay gia cố tứ nón"),
-    (r"\bgia co tr non\b", "gia cố tứ nón"),
-    (r"\btr non\b", "tứ nón"),
-    (r"\bCot thepcogoCB400-V\b", "Cốt thép có gờ CB400-V"),
-    (r"\bGioihanchay\b", "Giới hạn chảy"),
-    (r"\bcacketcaunhu sau\b", "các kết cấu như sau"),
-    (r"\bCot thep tron tron\b", "Cốt thép tròn trơn"),
-    (r"\bTuong chan, op mai ta luy duong dau cau\b", "Tường chắn, ốp mái ta luy đường đầu cầu"),
-    (r"\bOpmai taluy\b", "Ốp mái ta luy"),
-    (r"\bmaitaluy\b", "mái ta luy"),
-    (r"\bcobo tri\b", "có bố trí"),
-    (r"\bdauong thoat rurc\b", "đầu ống thoát nước"),
-    (r"\bthoat rurc\b", "thoát nước"),
-    (r"\bduoc boc vai dia ky thuat\b", "được bọc vải địa kỹ thuật"),
-    (r"\bDat dap thoat nuoc long mo va duong dau cau\b", "Đất đắp thoát nước lòng mố và đường đầu cầu"),
-    (r"\blongmova\b", "lòng mố và"),
-    (r"\blongm6\b", "lòng mố"),
-    (r"\bsaumoduocgia\b", "sau mố được gia"),
-    (r"\bdo doc doc\b", "độ dốc dọc"),
-    (r"\bD6 doc ngang\b", "Độ dốc ngang"),
-    (r"\bdo doc ngang\b", "độ dốc ngang"),
-    (r"\bS[6o0]\s*l[u]r?[o0]ng\b", "Số lượng"),
-    (r"\bkh[o0]i\s*l[u]r?[o0]ng\b", "khối lượng"),
-    (r"\btr[o0]ng\s*l[u]r?[o0]ng\b", "trọng lượng"),
-    (r"\blurong\b", "lượng"),
-    (r"\bchieu\s*dai\b", "chiều dài"),
-    (r"\bduong\s*kinh\b", "đường kính"),
-    (r"\bky\s*hieu\b", "ký hiệu"),
-    (r"\bdon\s*vi\b", "đơn vị"),
-    (r"\bghi\s*chu\b", "ghi chú"),
-
-    # Thổ nhưỡng & Địa chất
-    (r"lanrcay", "lẫn rễ cây"),
-    (r"\bthc\s*vat\b", "thực vật"),
-    (r"\bxamvang\b", "xám vàng"),
-    (r"\bxam den\b", "xám đen"),
-    (r"\bxam ghi\b", "xám ghi"),
-    (r"\bxam nau\b", "xám nâu"),
-    (r"\blan dam san\b", "lẫn dăm sạn"),
-    (r"\bdeo cung\b", "dẻo cứng"),
-    (r"\bDa phien set voi\b", "Đá phiến sét vôi"),
-    (r"\bxen kep mach thach anh- canxit\b", "xen kẹp mạch thạch anh - canxit"),
-    (r"\bphong hoa vra-nhe\b", "phong hóa vừa - nhẹ"),
-    (r"\bdoi cho phong hoa manh\b", "đôi chỗ phong hóa mạnh"),
-    (r"\bmau lay (?:duoc|được)\s*dang thoi ngan\b", "mẫu lấy được dạng thỏi ngắn"),
-    (r"\bdoi ch v vun thanh dam cuc\b", "đôi chỗ vỡ vụn thành dăm cục"),
-    (r"\bv vun thanh dam cuc\b", "vỡ vụn thành dăm cục"),
-    (r"\bthanh thep neoD32mm\b", "thanh thép neo D32mm"),
-    (r"\bcac bemat m\b", "các bề mặt mố"),
-    (r"\bbemat m\b", "bề mặt mố"),
-    (r"\btong nhya chat C12,5\b", "tông nhựa chặt C12.5"),
-    (r"\bchieu daynhonhat\b", "chiều dày nhỏ nhất"),
-    (r"\bkhoan\s*neo\s*vao\s*da\s*g6c\b", "khoan neo vào đá gốc"),
-    (r"\bkhoan\s*neo\s*vaoda\s*g6c\b", "khoan neo vào đá gốc"),
-    (r"\bfc²\s*=\s*([0-9]+)\s*MPa", r"f'c = \1 MPa"),
-    (r"\bfe'\s*=\s*([0-9]+)\s*MPa", r"f'c = \1 MPa"),
-
-    # Tiêu chuẩn TCVN / QCVN
-    (r"\bTCVN8871-1:2011÷", "TCVN 8871-1:2011"),
-    (r"\bTCVN8871-([0-9]):2011\b", r"TCVN 8871-\1:2011"),
-    (r"\bQCVN41:2016/BGTVT\b", "QCVN 41:2016/BGTVT"),
-    (r"\bQCVN41:2019/BGTVT\b", "QCVN 41:2019/BGTVT"),
-    (r"\bTCVN11823-2017\b", "TCVN 11823:2017"),
-    (r"\bTCVN9845:2013\b", "TCVN 9845:2013"),
-    (r"\bTCVN9386-2:2012\b", "TCVN 9386-2:2012"),
-    (r"\bTCVN9386:2012\b", "TCVN 9386:2012"),
-    (r"\bTCVN\s*4054-05\b", "TCVN 4054:2005"),
-    (r"\bTCVN\s*1651:2008\b", "TCVN 1651:2008"),
+    # NOTE: luat va-tai-lieu-cu-the (thay ca cau) da TACH sang aec_project_rules.json.
+    # O day CHI giu luat khoi phuc dau / tach tu TONG QUAT, tai dung cho moi ho so.
+    ('\\bGO1\\s+THAU\\b', 'GÓI THẦU'),
+    ('\\bTHIET\\s*KEBVTC\\b', 'THIẾT KẾ BVTC'),
+    ('\\bBérong\\b', 'Bề rộng'),
+    ('\\bBerong\\b', 'Bề rộng'),
+    ('\\bBe\\s*rong\\b', 'Bề rộng'),
+    ('\\bGoicaucao\\s*su\\b', 'Gối cầu cao su'),
+    ('\\bcotban\\s*theploai\\b', 'cốt bản thép loại'),
+    ('\\btheploai\\b', 'thép loại'),
+    ('\\bmat\\s*do\\s*ma\\s*([0-9]+)', 'mật độ mạ \\1'),
+    ('\\bchiu\\s+lyrc\\b', 'chịu lực'),
+    ('\\bchiu\\s+luc\\b', 'chịu lực'),
+    ('\\bchju\\s+luc\\b', 'chịu lực'),
+    ('\\bchju\\s+dong\\s+dat\\b', 'chịu động đất'),
+    ('\\bchju\\b', 'chịu'),
+    ('\\btiu\\s+tren\\s+xuong\\b', 'từ trên xuống'),
+    ('\\bvra-nhe\\b', 'vừa - nhẹ'),
+    ('\\bdamBTCT\\b', 'dầm BTCT'),
+    ('\\bKetcau\\b', 'Kết cấu'),
+    ('\\bSodonhip\\b', 'Sơ đồ nhịp'),
+    ('\\bgira\\s+cac\\s+dam\\b', 'giữa các dầm'),
+    ('\\bb6\\s+tri\\b', 'bố trí'),
+    ('\\bbo\\s*tri\\b', 'bố trí'),
+    ('\\bdurong\\s+be\\s+tong\\b', 'đường bê tông'),
+    ('\\bdurong\\s+BT\\b', 'đường BT'),
+    ('\\bdurong\\s+o\\s+to\\b', 'đường ô tô'),
+    ('\\bdurong\\b', 'đường'),
+    ('\\bdugclienketvoi\\b', 'được liên kết với'),
+    ('\\bdugc\\b', 'được'),
+    ('\\blienketvoi\\b', 'liên kết với'),
+    ('\\btir\\b', 'từ'),
+    ('\\bChu\\s+dau\\s+tur\\b', 'Chủ đầu tư'),
+    ('\\blang\\s+nhya\\b', 'láng nhựa'),
+    ('\\bdjaky\\s+thuat\\b', 'địa kỹ thuật'),
+    ('\\bvemang\\s+phanquang\\b', 'về màng phản quang'),
+    ('\\bDACDIEMDIACHAT\\b', 'ĐẶC ĐIỂM ĐỊA CHẤT'),
+    ('\\bGIAIPHAPTHIETKE\\b', 'GIẢI PHÁP THIẾT KẾ'),
+    ('\\bPhan cau\\b', 'Phần cầu'),
+    ('\\bVat lieu sir dung\\b', 'Vật liệu sử dụng'),
+    ('\\bsir dung\\b', 'sử dụng'),
+    ('\\btuong duong\\b', 'tương đương'),
+    ('\\bgita nhip\\b', 'giữa nhịp'),
+    ('\\b1op phong nuoc\\b', 'lớp phòng nước'),
+    ('\\b1op da dam\\b', 'lớp đá dăm'),
+    ('\\bmongam\\b', 'móng ngàm'),
+    ('\\bdagoc\\b', 'đá gốc'),
+    ('\\bda goc\\b', 'đá gốc'),
+    ('\\bgia co tr non\\b', 'gia cố tứ nón'),
+    ('\\btr non\\b', 'tứ nón'),
+    ('\\bGioihanchay\\b', 'Giới hạn chảy'),
+    ('\\bCot thep tron tron\\b', 'Cốt thép tròn trơn'),
+    ('\\bOpmai taluy\\b', 'Ốp mái ta luy'),
+    ('\\bmaitaluy\\b', 'mái ta luy'),
+    ('\\bcobo tri\\b', 'có bố trí'),
+    ('\\bdauong thoat rurc\\b', 'đầu ống thoát nước'),
+    ('\\bthoat rurc\\b', 'thoát nước'),
+    ('\\blongmova\\b', 'lòng mố và'),
+    ('\\blongm6\\b', 'lòng mố'),
+    ('\\bsaumoduocgia\\b', 'sau mố được gia'),
+    ('\\bdo doc doc\\b', 'độ dốc dọc'),
+    ('\\bD6 doc ngang\\b', 'Độ dốc ngang'),
+    ('\\bdo doc ngang\\b', 'độ dốc ngang'),
+    ('\\bS[6o0]\\s*l[u]r?[o0]ng\\b', 'Số lượng'),
+    ('\\bkh[o0]i\\s*l[u]r?[o0]ng\\b', 'khối lượng'),
+    ('\\btr[o0]ng\\s*l[u]r?[o0]ng\\b', 'trọng lượng'),
+    ('\\blurong\\b', 'lượng'),
+    ('\\bchieu\\s*dai\\b', 'chiều dài'),
+    ('\\bduong\\s*kinh\\b', 'đường kính'),
+    ('\\bky\\s*hieu\\b', 'ký hiệu'),
+    ('\\bdon\\s*vi\\b', 'đơn vị'),
+    ('\\bghi\\s*chu\\b', 'ghi chú'),
+    ('lanrcay', 'lẫn rễ cây'),
+    ('\\bthc\\s*vat\\b', 'thực vật'),
+    ('\\bxamvang\\b', 'xám vàng'),
+    ('\\bxam den\\b', 'xám đen'),
+    ('\\bxam ghi\\b', 'xám ghi'),
+    ('\\bxam nau\\b', 'xám nâu'),
+    ('\\blan dam san\\b', 'lẫn dăm sạn'),
+    ('\\bdeo cung\\b', 'dẻo cứng'),
+    ('\\bDa phien set voi\\b', 'Đá phiến sét vôi'),
+    ('\\bthanh thep neoD32mm\\b', 'thanh thép neo D32mm'),
+    ('\\bcac bemat m\\b', 'các bề mặt mố'),
+    ('\\bbemat m\\b', 'bề mặt mố'),
+    ('\\btong nhya chat C12,5\\b', 'tông nhựa chặt C12.5'),
+    ('\\bchieu daynhonhat\\b', 'chiều dày nhỏ nhất'),
+    ('\\bfc²\\s*=\\s*([0-9]+)\\s*MPa', "f'c = \\1 MPa"),
+    ("\\bfe'\\s*=\\s*([0-9]+)\\s*MPa", "f'c = \\1 MPa"),
+    ('\\bTCVN8871-1:2011÷', 'TCVN 8871-1:2011'),
+    ('\\bTCVN8871-([0-9]):2011\\b', 'TCVN 8871-\\1:2011'),
+    ('\\bQCVN41:2016/BGTVT\\b', 'QCVN 41:2016/BGTVT'),
+    ('\\bQCVN41:2019/BGTVT\\b', 'QCVN 41:2019/BGTVT'),
+    ('\\bTCVN11823-2017\\b', 'TCVN 11823:2017'),
+    ('\\bTCVN9845:2013\\b', 'TCVN 9845:2013'),
+    ('\\bTCVN9386-2:2012\\b', 'TCVN 9386-2:2012'),
+    ('\\bTCVN9386:2012\\b', 'TCVN 9386:2012'),
+    ('\\bTCVN\\s*4054-05\\b', 'TCVN 4054:2005'),
+    ('\\bTCVN\\s*1651:2008\\b', 'TCVN 1651:2008'),
 ]
 
 CUSTOM_RULES: List[Tuple[str, str]] = []
 _custom_rules_loaded = False
 _compiled_rules: Optional[List[Tuple[re.Pattern, str]]] = None
+
+# Luật vá-tài-liệu-cụ-thể (thay cả câu) — TÁCH khỏi core sang file dữ liệu aec_project_rules.json.
+PROJECT_RULES: List[Tuple[str, str]] = []
+_project_rules_loaded = False
+
+
+def load_project_rules() -> List[Tuple[str, str]]:
+    """Nạp luật vá theo dự án từ aec_project_rules.json (giá trị khớp cả câu cho một bộ hồ sơ).
+    Áp dụng TRƯỚC các luật tổng quát để giữ đúng hành vi cũ (khớp chuỗi dính nguyên gốc)."""
+    global PROJECT_RULES, _project_rules_loaded
+    if _project_rules_loaded:
+        return PROJECT_RULES
+    _project_rules_loaded = True
+    for p in (Path(__file__).resolve().parent / "aec_project_rules.json",
+              Path.cwd() / "aec_project_rules.json"):
+        if p.exists():
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    for item in data:
+                        if isinstance(item, list) and len(item) == 2:
+                            PROJECT_RULES.append((str(item[0]), str(item[1])))
+                        elif isinstance(item, dict) and "pattern" in item and "replace" in item:
+                            PROJECT_RULES.append((str(item["pattern"]), str(item["replace"])))
+            except Exception as e:
+                log.warning("Đọc aec_project_rules.json lỗi (%s): %s", p, e)
+            break
+    return PROJECT_RULES
 
 
 def load_custom_rules() -> List[Tuple[str, str]]:
@@ -188,8 +194,8 @@ def load_custom_rules() -> List[Tuple[str, str]]:
                             CUSTOM_RULES.append((str(item[0]), str(item[1])))
                         elif isinstance(item, dict) and "pattern" in item and "replace" in item:
                             CUSTOM_RULES.append((str(item["pattern"]), str(item["replace"])))
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("Đọc custom_rules.json lỗi (%s): %s", p, e)
             break
     return CUSTOM_RULES
 
@@ -211,7 +217,7 @@ def fix_vietnamese_typos(text: str) -> str:
         return ""
     if _compiled_rules is None:
         _compiled_rules = [(re.compile(p, re.IGNORECASE), r)
-                           for p, r in VIETNAMESE_AEC_RULES + load_custom_rules()]
+                           for p, r in load_project_rules() + VIETNAMESE_AEC_RULES + load_custom_rules()]
     result = text
     for pattern, replacement in _compiled_rules:
         result = pattern.sub(lambda m, r=replacement: _match_case(m.group(0), m.expand(r)), result)
@@ -220,8 +226,8 @@ def fix_vietnamese_typos(text: str) -> str:
     try:
         from vn_diacritics import restore_vietnamese_diacritics
         result = restore_vietnamese_diacritics(result)
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("restore_vietnamese_diacritics lỗi (giữ nguyên text): %s", e)
 
     # Thêm khoảng trắng sau dấu hai chấm nếu dính chữ cái ('Trong do:Bérong').
     # Không áp dụng cho số để giữ tỷ lệ 1:500, giờ 14:30, TCVN 11823:2017.
@@ -330,60 +336,11 @@ def _median_h(items: List[Dict[str, Any]]) -> float:
 # ─────────────────────────────────────────────────────────────────────────────
 # Số liệu: nhận dạng & chuẩn hóa
 # ─────────────────────────────────────────────────────────────────────────────
-_UNIT = r"(?:mm|cm|dm|m|m2|m3|m²|m³|km|kg|kg/m|kg/m3|t|tấn|T|kN|MPa|%|cái|thanh|md)"
-_NUMBER_CELL = re.compile(r"^\s*[-+]?\s*\d[\d.,\s]*\s*" + _UNIT + r"?\s*$", re.IGNORECASE)
-
-
-def is_number_cell(text: str) -> bool:
-    return bool(text) and bool(_NUMBER_CELL.match(text)) and not re.search(r"\d\s+\d", text.strip())
-
-
-def detect_number_style(cells: List[str]) -> str:
-    """'vn' (1.525,81 hoặc 1.525), 'us' (1,525.81) hoặc 'unknown' theo đa số ô trong bảng.
-    Bảng cốt thép VN hay dùng dấu chấm phân nghìn cho số nguyên lớn (1.525 kg).
-    """
-    vn = us = 0
-    for c in cells:
-        t = c.strip()
-        # VN: có dấu phẩy thập phân, hoặc số nguyên dùng chấm phân nghìn (1.525, 12.500)
-        if (re.search(r"\d\.\d{3},\d+$", t)                    # 1.525,81
-                or re.search(r"(?<![\d.])\d+,\d{1,2}$", t)     # 25,50
-                or re.search(r"^\d{1,3}(?:\.\d{3})+$", t)):    # 1.525 (nguyên, phân nghìn)
-            vn += 1
-        elif (re.search(r"\d,\d{3}\.\d+$", t)                  # 1,525.81
-              or re.search(r"(?<![\d,])\d+\.\d{1,2}$", t)):    # 25.50
-            us += 1
-    if vn > us:
-        return "vn"
-    if us > vn:
-        return "us"
-    # Mặc định bản vẽ VN → vn
-    return "vn"
-
-
-def parse_number(text: str, style: str = "unknown") -> Optional[float]:
-    """Đổi chữ số trong ô thành float; None nếu ô không phải một con số."""
-    if not is_number_cell(text):
-        return None
-    m = re.match(r"\s*([-+]?)\s*(\d[\d.,]*)", text)
-    if not m:
-        return None
-    sign, s = m.group(1), m.group(2).rstrip(".,")
-    if "." in s and "," in s:
-        dec = "," if s.rfind(",") > s.rfind(".") else "."
-        s = s.replace("." if dec == "," else ",", "").replace(dec, ".")
-    elif "," in s:
-        if s.count(",") > 1 or (style == "us" and re.fullmatch(r"\d{1,3}(,\d{3})+", s)):
-            s = s.replace(",", "")
-        else:
-            s = s.replace(",", ".")
-    elif "." in s:
-        if s.count(".") > 1 or (style == "vn" and re.fullmatch(r"\d{1,3}\.\d{3}", s)):
-            s = s.replace(".", "")
-    try:
-        return float(sign + s)
-    except ValueError:
-        return None
+# Tiện ích số liệu ĐÃ TÁCH sang number_utils.py (giảm kích thước file). Re-export để các
+# import cũ 'from layout_reconstructor import parse_number, ...' vẫn hoạt động nguyên vẹn.
+from number_utils import (  # noqa: E402,F401
+    _UNIT, _NUMBER_CELL, is_number_cell, detect_number_style, parse_number,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

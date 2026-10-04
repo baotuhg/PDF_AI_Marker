@@ -44,32 +44,8 @@ from license_cloud import recover_license_from_cloud, get_cloud_config, save_clo
 from license_core import _get_candidate_machine_ids
 from fluent_theme import get_current_theme, save_current_theme, get_theme_qss
 
-# (mã chế độ cho marker_worker, nhãn hiển thị)
-MODES = [
-    ('rapid_ocr', '[Siêu tốc] OCR Tiếng Việt Chuyên ngành AEC – bản vẽ/scan (~3–5s/trang • Khuyên dùng)'),
-    ('vn_ocr', '[Chuyên sâu] VLM Tiếng Việt Chi tiết – bản vẽ/scan (~15–40s/trang • cần GPU NVIDIA)'),
-    ('fast_text', '[Siêu nhanh] PDF bản gõ / bản vẽ AutoCAD, tự đọc chữ SHX (~0.3–7s/trang)'),
-    ('auto', '[Marker] AI phân tích bố cục + OCR (tài liệu văn bản, sách)'),
-    ('ocr', '[Marker OCR] Nhận dạng AI toàn bộ trang'),
-    ('text', '[Marker Text] Chỉ text Marker (không OCR)'),
-]
-
-_EXTS = ('.pdf', '.docx', '.xlsx', '.xlsm')
-
-
-def detect_nvidia_gpu():
-    try:
-        import subprocess
-        r = subprocess.run(
-            ['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'],
-            capture_output=True, text=True, timeout=3,
-            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)
-        )
-        if r.returncode == 0 and r.stdout.strip():
-            return r.stdout.strip().splitlines()[0]
-    except Exception:
-        pass
-    return ''
+# Hằng số & tiện ích thuần tách sang app_utils.py (giảm kích thước app.py).
+from app_utils import MODES, _EXTS, detect_nvidia_gpu  # noqa: F401
 
 
 class App(QMainWindow):
