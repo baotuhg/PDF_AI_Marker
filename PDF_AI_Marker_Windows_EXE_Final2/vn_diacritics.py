@@ -614,70 +614,98 @@ AEC_COMPOUND_PHRASES.sort(key=lambda x: len(x[0].split()), reverse=True)
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. TỪ ĐIỂN TỪ ĐƠN KỸ THUẬT & NGỮ CẢNH AN TOÀN
 # ─────────────────────────────────────────────────────────────────────────────
-AEC_CONTEXT_RULES: List[Tuple[str, str]] = [
-    # Cấu kiện + Mã hiệu (M1, T1, D1, C1, W1...)
-    (r"\bmo\s+([A-Za-z0-9]+)\b", r"mố \1"),
-    (r"\btru\s+([A-Za-z0-9]+)\b", r"trụ \1"),
-    (r"\bcoc\s+([A-Za-z0-9]+)\b", r"cọc \1"),
-    (r"\bdam\s+([A-Za-z0-9]+)\b", r"dầm \1"),
-    (r"\bthep\s+([A-Za-z0-9]+)\b", r"thép \1"),
-    (r"\bduong\s+([A-Za-z0-9]+)\b", r"đường \1"),
-    (r"\bthanh\s+([A-Za-z0-9]+)\b", r"thanh \1"),
-    (r"\bbang\s+([A-Za-z0-9]+)\b", r"bảng \1"),
+# Mẫu "mã hiệu/cấu kiện": token CÓ CHỨA CHỮ SỐ (M1, T2, D16, CB400, Ø20, 250…).
+# Dùng để chỉ gắn dấu cho "mố/dầm/cọc/thép…" khi theo sau là MÃ HIỆU thật,
+# tránh phá các từ đồng âm không dấu (vd "mo da" = "mỏ đá", KHÔNG phải "mố đá";
+# "dam loai" KHÔNG phải "dầm loại").
+_MARK = r"([A-Za-zÀ-ỹØø]{0,4}\d[\dA-Za-zÀ-ỹ.\-/]*)"
 
-    # Số lượng + Danh từ kết cấu
-    (r"\b(\d+)\s*lop\b", r"\1 lớp"),
-    (r"\blop\s*(\d+)\b", r"lớp \1"),
+AEC_CONTEXT_RULES: List[Tuple[str, str]] = [
+    # ── Nhóm A — Cụm vật liệu / địa chất / màu sắc ĐẶC THÙ (đa từ): PHẢI chạy trước ──
+    # (nếu để sau các luật gắn-mã-hiệu thì "da dam" bị "dam …" xén mất → sai thành "đã dầm")
+    (r"\bda\s+(\d+\s*x\s*\d+)\b", r"đá \1"),   # đá 1x2, đá 4x6
+    (r"\bda\s+dam\b", "đá dăm"),
+    (r"\bda\s+hoc\b", "đá hộc"),
+    (r"\bda\s+base\b", "đá base"),
+    (r"\bda\s+1\s*x\s*2\b", "đá 1x2"),
+    (r"\bcuoi\s+soi\b", "cuội sỏi"),
+    (r"\bcat\s+hat\b", "cát hạt"),
+    (r"\bdam\s+cuc\b", "dăm cục"),
+    (r"\bthuc\s+vat\b", "thực vật"),
+    (r"\bre\s+cay\b", "rễ cây"),
+    (r"\blop\s+be\s+tong\b", "lớp bê tông"),
     (r"\blop\s+nhua\b", "lớp nhựa"),
     (r"\blop\s+phu\b", "lớp phủ"),
-    (r"\bmac\s*([0-9]+|[A-Za-z]+)", r"mác \1"),
-    (r"\bso\s+(\d+)\b", r"số \1"),
-    (r"\bso\s*:\s*(\d+)", r"số: \1"),
-    (r"\bngo\s+(\d+)\b", r"ngõ \1"),
-    (r"\bto\s+(\d+)\b", r"tổ \1"),
-    (r"\bphuong\s+([A-ZÀ-Ỹa-zà-ỹ0-9]+)", r"phường \1"),
-    (r"\bxa\s+([A-ZÀ-Ỹa-zà-ỹ0-9]+)", r"xã \1"),
-    (r"\blop\s+([A-Za-z0-9]+)\b", r"lớp \1"),
     (r"\bxam\s+vang\b", "xám vàng"),
     (r"\bxam\s+nau\b", "xám nâu"),
     (r"\bxam\s+den\b", "xám đen"),
     (r"\bxam\s+ghi\b", "xám ghi"),
     (r"\bnau\s+do\b", "nâu đỏ"),
     (r"\bvang\s+do\b", "vàng đỏ"),
-    (r"\bthuc\s+vat\b", "thực vật"),
-    (r"\bdam\s+cuc\b", "dăm cục"),
-    (r"\bcuoi\s+soi\b", "cuội sỏi"),
-    (r"\bda\s+dam\b", "đá dăm"),
-    (r"\bcat\s+hat\b", "cát hạt"),
 
-    # Từ nối & Ngữ pháp kỹ thuật thông dụng
+    # ── Nhóm A2 — Trạng thái "đã + động từ" (an toàn: "đá được/đá thi công" là vô nghĩa) ──
+    # Thay cho luật cũ "\bda\b → đã" vốn phá hỏng "đá" (vật liệu phổ biến nhất trong BoQ).
+    (r"\bda\s+duoc\b", "đã được"),
+    (r"\bda\s+hoan\s*thanh\b", "đã hoàn thành"),
+    (r"\bda\s+hoan\s*cong\b", "đã hoàn công"),
+    (r"\bda\s+thi\s*cong\b", "đã thi công"),
+    (r"\bda\s+nghiem\s*thu\b", "đã nghiệm thu"),
+    (r"\bda\s+lap\s*dat\b", "đã lắp đặt"),
+    (r"\bda\s+phe\s*duyet\b", "đã phê duyệt"),
+    (r"\bda\s+duyet\b", "đã duyệt"),
+
+    # ── Nhóm B — Số lượng / mã hiệu neo theo CHỮ SỐ (an toàn) ──
+    (r"\b(\d+)\s*lop\b", r"\1 lớp"),
+    (r"\blop\s+(\d+)\b", r"lớp \1"),
+    (r"\bloai\s+(\d+)\b", r"loại \1"),
+    (r"\bmac\s*([A-Za-z]{0,3}\d+)", r"mác \1"),   # mác 250, mác M300, mác CB400
+    (r"\bso\s*:\s*(\d+)", r"số: \1"),
+    (r"\bso\s+(\d+)\b", r"số \1"),
+    (r"\bngo\s+(\d+)\b", r"ngõ \1"),
+    (r"\bto\s+(\d+)\b", r"tổ \1"),
+
+    # ── Nhóm C — Gắn dấu cấu kiện CHỈ khi theo sau là MÃ HIỆU (có chữ số) ──
+    # "mo M1"→"mố M1" nhưng "mo da" (mỏ đá) giữ nguyên; "dam T2"→"dầm T2" nhưng "dam loai" giữ nguyên.
+    (r"\bmo\s+" + _MARK, r"mố \1"),
+    (r"\btru\s+" + _MARK, r"trụ \1"),
+    (r"\bcoc\s+" + _MARK, r"cọc \1"),
+    (r"\bdam\s+" + _MARK, r"dầm \1"),
+    (r"\bthep\s+" + _MARK, r"thép \1"),
+    (r"\bbang\s+" + _MARK, r"bảng \1"),
+
+    # ── Nhóm D — Địa danh: chỉ gắn dấu khi theo sau là từ VIẾT HOA (tên riêng) ──
+    # Tránh "cách xa 5m"→"xã 5m"; "phuong phap"(phương pháp) do lớp cụm từ ghép lo.
+    (r"\bphuong\s+(?=[A-ZÀ-Ỹ])", "phường "),
+    (r"\bxa\s+(?=[A-ZÀ-Ỹ])", "xã "),
+
+    # ── Nhóm E — Hư từ / ngữ pháp: CHỈ áp cho chữ thường (token IN HOA được bảo vệ ở restore) ──
     (r"\bduoc\b", "được"),
     (r"\bla\b", "là"),
     (r"\bva\b", "và"),
-    (r"\bcua\b", "của"),
     (r"\btren\b", "trên"),
     (r"\bduoi\b", "dưới"),
-    (r"\btu\b(?=\s+[a-zà-ỹA-Z0-9])", "từ"),
-    (r"\bden\b", "đến"),
+    (r"\btu\b(?=\s+[a-zà-ỹ0-9])", "từ"),
     (r"\bde\b", "để"),
     (r"\bcac\b", "các"),
     (r"\bnhung\b", "những"),
     (r"\bvoi\b", "với"),
     (r"\btai\b", "tại"),
-    (r"\btheo\b", "theo"),
-    (r"\bve\b(?=\s+[a-zà-ỹA-Z0-9])", "về"),
+    (r"\bve\b(?=\s+[a-zà-ỹ0-9])", "về"),
     (r"\bcan\b(?=\s+phai)", "cần"),
     (r"\bphai\b", "phải"),
-    (r"\bco\b(?=\s+[a-zà-ỹA-Z0-9])", "có"),
+    (r"\bco\b(?=\s+[a-zà-ỹ0-9])", "có"),
     (r"\bkhong\b", "không"),
     (r"\bse\b", "sẽ"),
-    (r"\bda\b(?=\s+[a-zà-ỹA-Z0-9])", "đã"),
     (r"\bchua\b", "chưa"),
     (r"\brang\b", "rằng"),
     (r"\bnhu\b", "như"),
-    (r"\bthi\b", "thì"),
     (r"\btrong\s+do\b", "trong đó"),
-    (r"\btrong\b", "trong"),
+    # ĐÃ GỠ (gây sai dấu đồng âm với từ rất thông dụng ngành xây dựng):
+    #   'thi'→'thì'  phá "thi công"  → "thì công"
+    #   'den'→'đến'  phá "màu đen" / "đèn" → "màu đến"
+    #   'cua'→'của'  phá "cửa đi/cửa sổ" → "của đi/của sổ"
+    # Các từ này để NGUYÊN không dấu còn hơn gán dấu sai; cụm từ ghép (Bước 2) vẫn phục hồi
+    # được khi có ngữ cảnh chắc chắn (vd "cua di nhom kinh"→"cửa đi nhôm kính").
     (r"\bmau\b(?=\s+(?:xam|vang|nau|den|do|trang|xanh|ghi))", "màu"),
     (r"\blan\b(?=\s+(?:re|dam|san|soi|da|cat|bun|set))", "lẫn"),
 ]
@@ -705,6 +733,38 @@ def match_case(template: str, text: str) -> str:
     return text.lower()
 
 
+def _is_caps_label(s: str) -> bool:
+    """True nếu đoạn khớp là token IN HOA toàn bộ (nhãn/mã hiệu bản vẽ: 'VA', 'MO', 'GA', 'BTCT').
+    Dùng để lớp ngữ cảnh KHÔNG gán dấu lên các nhãn in hoa (tránh 'VA'→'VÀ', 'MO'→'MỐ')."""
+    letters = [c for c in s if c.isalpha()]
+    return bool(letters) and all(c.isupper() for c in letters)
+
+
+def _context_sub(m: "re.Match", repl: str) -> str:
+    """Thay thế cho LỚP NGỮ CẢNH (Bước 3):
+      1. Bỏ qua token IN HOA (nhãn/mã hiệu) để không phá chữ in hoa trên bản vẽ.
+      2. Giữ nguyên hoa/thường của phần mã hiệu được tham chiếu (\\1) — vd 'coc C1'→'cọc C1',
+         KHÔNG hạ thành 'cọc c1' như hành vi match_case cũ.
+      3. Chỉ viết hoa chữ cái đầu khi token gốc vốn viết hoa đầu (đầu câu / Title Case)."""
+    span = m.group(0)
+    if _is_caps_label(span):
+        return span
+    out = m.expand(repl)
+    if span[:1].isupper():
+        out = out[:1].upper() + out[1:]
+    return out
+
+
+def _apply_correction(span: str, corrected: str) -> str:
+    """Áp dụng sửa lỗi OCR do NGƯỜI dùng xác nhận (literal), giữ kiểu viết hoa của chỗ gốc.
+    Khác _context_sub: nhãn IN HOA VẪN được sửa (vì người dùng đã xác nhận chỗ đó sai)."""
+    if _is_caps_label(span):
+        return corrected.upper()
+    if span[:1].isupper():
+        return corrected[:1].upper() + corrected[1:]
+    return corrected
+
+
 class VietnameseDiacriticRestorer:
     """
     Engine phục hồi dấu tiếng Việt từ văn bản Latin không dấu.
@@ -729,7 +789,10 @@ class VietnameseDiacriticRestorer:
             (re.compile(pat, re.IGNORECASE), repl) for pat, repl in AEC_CONTEXT_RULES
         ]
 
-        # 4. Tự động nạp kinh nghiệm tích lũy từ experience_db.json
+        # 4. Sửa lỗi OCR do NGƯỜI dùng xác nhận (literal, an toàn) — áp dụng cuối cùng.
+        self.correction_rules: List[Tuple] = []
+
+        # 5. Tự động nạp kinh nghiệm tích lũy từ experience_db.json
         try:
             from pathlib import Path
             import json
@@ -744,8 +807,27 @@ class VietnameseDiacriticRestorer:
                         words = raw_k.split()
                         regex_pat = r"\b" + r"\s+".join(re.escape(w) for w in words) + r"\b"
                         self.phrase_rules.insert(0, (re.compile(regex_pat, re.IGNORECASE), phr))
+                    # Nạp các cặp sửa lỗi OCR AN TOÀN (chỉ chữ, đã được người dùng xác nhận)
+                    for raw, entry in (data.get("ocr_corrections", {}) or {}).items():
+                        if isinstance(entry, dict):
+                            corrected, safe = entry.get("corrected", ""), entry.get("safe", False)
+                        else:  # tương thích schema cũ: giá trị là chuỗi
+                            corrected, safe = str(entry), not re.search(r"\d", raw)
+                        if safe and corrected:
+                            self.add_correction(raw, corrected)
         except Exception:
             pass
+
+    def add_correction(self, raw: str, corrected: str) -> bool:
+        """Thêm một luật sửa lỗi OCR literal (chỉ chấp nhận cặp CHỮ, không chứa số)."""
+        raw = (raw or "").strip()
+        corrected = (corrected or "").strip()
+        if not raw or not corrected or raw == corrected or re.search(r"\d", raw):
+            return False
+        words = raw.split()
+        pat = r"\b" + r"\s+".join(re.escape(w) for w in words) + r"\b"
+        self.correction_rules.append((re.compile(pat, re.IGNORECASE), corrected))
+        return True
 
     def restore(self, text: str) -> str:
         """Khôi phục dấu tiếng Việt cho chuỗi văn bản."""
@@ -761,9 +843,14 @@ class VietnameseDiacriticRestorer:
         for comp, repl in self.phrase_rules:
             result = comp.sub(lambda m, r=repl: match_case(m.group(0), r), result)
 
-        # Bước 3: Khớp các quy tắc ngữ cảnh và ngữ pháp
+        # Bước 3: Khớp các quy tắc ngữ cảnh và ngữ pháp.
+        # Bảo vệ token IN HOA (nhãn/mã hiệu) và giữ nguyên hoa/thường của mã hiệu (xem _context_sub).
         for comp, repl in self.context_rules:
-            result = comp.sub(lambda m, r=repl: match_case(m.group(0), m.expand(r)), result)
+            result = comp.sub(lambda m, r=repl: _context_sub(m, r), result)
+
+        # Bước 4: Sửa lỗi OCR do người dùng xác nhận (literal) — đặt cuối để "chốt" kết quả.
+        for comp, corrected in self.correction_rules:
+            result = comp.sub(lambda m, c=corrected: _apply_correction(m.group(0), c), result)
 
         return result
 
