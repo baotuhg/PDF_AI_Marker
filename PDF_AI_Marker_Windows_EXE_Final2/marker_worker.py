@@ -459,6 +459,7 @@ def _write_numeric_audit_report(tables, path):
         "duong_kinh_la": "Đường kính ngoài TCVN",
         "lech_tong_dai": "Lệch tổng chiều dài (≠ dài×số lượng)",
         "lech_tong_bang": "Lệch tổng trọng lượng toàn bảng",
+        "khai_trien_tu_hinh": "Chiều dài khai triển SUY TỪ HÌNH DẠNG (SHX) — cần kiểm tra bù uốn/móc",
     }
     rows = [d for t in tables for d in (t.get("audit", {}) or {}).get("warnings_detail", [])]
     out = ["# KIỂM TRA SỐ LIỆU BẢNG (TỰ ĐỘNG ĐỐI CHIẾU)", "",

@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from table_agent import (
     AECTableAuditor, CAT_REBAR,
-    parse_length_expr, _safe_eval_arith, _len_to_meters, _num_token,
+    parse_length_expr, _safe_eval_arith, _len_to_meters, _num_token, shape_segments,
 )
 
 
@@ -116,6 +116,41 @@ def test_canh_bao_co_trang_ban_ve():
     res = _audit()
     for d in res["warnings_detail"]:
         assert d["page"] == 7 and d["sheet"] == "KC-05"
+
+
+# ── (Option B) SUY CHIỀU DÀI KHAI TRIỂN TỪ HÌNH DẠNG (giá trị SHX) ────────────
+def test_shape_segments_loc_goc_va_duong_kinh():
+    # '90' là góc uốn -> loại; '16' = đường kính -> loại; giữ các đoạn thật
+    segs = shape_segments("16 1200 300 300 150 150 90", "vn", diameter=16)
+    assert segs == [1200.0, 300.0, 300.0, 150.0, 150.0], segs
+
+
+def test_khai_trien_tu_hinh_dang():
+    """Thanh có chiều dài dạng biến (a+2b+2c) nhưng ô hình dạng có kích thước SHX
+    -> suy chiều dài khai triển = tổng các đoạn, tính được trọng lượng, có cờ."""
+    tbl = {
+        "header": ["Ký hiệu", "Đường kính (mm)", "Hình dạng", "Chiều dài", "Số lượng", "Trọng lượng (kg)"],
+        "rows": [["T1", "16", "1200 300 300 150 150 90", "a+2b+2c", "10", ""]],
+        "number_style": "vn", "page": 5, "sheet": "KC-07",
+    }
+    res = AECTableAuditor.audit(tbl, CAT_REBAR)
+    it = res["rebar_items"]
+    assert len(it) == 1 and it[0]["length_kind"] == "from_shape", res["rebar_items"]
+    assert it[0]["length_mm"] == 2100, it[0]        # 1200+300+300+150+150
+    assert it[0]["shape_segments_mm"] == [1200, 300, 300, 150, 150]
+    assert "khai_trien_tu_hinh" in {d["kind"] for d in res["warnings_detail"]}
+
+
+def test_khong_suy_duoc_thi_bao_phuc_tap():
+    """Chiều dài dạng biến và hình dạng KHÔNG đủ đoạn -> giữ cờ hình học phức tạp, không tính."""
+    tbl = {
+        "header": ["Ký hiệu", "Đường kính (mm)", "Hình dạng", "Chiều dài", "Số lượng", "Trọng lượng (kg)"],
+        "rows": [["T9", "16", "90", "a+b", "4", ""]],
+        "number_style": "vn", "page": 5, "sheet": "KC-07",
+    }
+    res = AECTableAuditor.audit(tbl, CAT_REBAR)
+    assert res["rebar_items"] == [], res["rebar_items"]
+    assert "hinh_hoc_phuc_tap" in {d["kind"] for d in res["warnings_detail"]}
 
 
 # ── Trình chạy độc lập ────────────────────────────────────────────────────────

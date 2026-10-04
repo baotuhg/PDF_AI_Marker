@@ -226,6 +226,33 @@ def _len_to_meters(length: float, unit: Optional[str]) -> float:
     return length / 1000.0 if length > 100 else length   # dự phòng khi tiêu đề không ghi đơn vị
 
 
+# Góc uốn thép TIÊU CHUẨN (độ) — loại khỏi danh sách đoạn chiều dài khi suy từ hình dạng.
+# Chỉ giữ 90/135/180 (góc uốn/móc chuẩn); KHÔNG loại 150/120/60… vì đó là kích thước phổ biến.
+_COMMON_ANGLES = {90, 135, 180}
+
+
+def shape_segments(text: Any, style: str = "unknown", diameter: Optional[int] = None) -> List[float]:
+    """Trích các ĐOẠN kích thước (mm) từ ô 'hình dạng/sơ đồ uốn'.
+
+    Kích thước uốn trên bản vẽ CAD được xuất dưới dạng chú thích 'AutoCAD SHX Text' nên có
+    GIÁ TRỊ CHÍNH XÁC (không phải OCR đoán). Hàm lọc bỏ góc uốn (90/135/180…), trị bằng đường
+    kính, và trị ngoài dải đoạn hợp lý — giữ lại các đoạn thẳng để cộng ra chiều dài khai triển.
+    """
+    segs: List[float] = []
+    for tok in re.findall(r"\d[\d.,]*", str(text or "")):
+        v = _num_token(tok, style)
+        if v is None:
+            continue
+        if not (40 <= v <= 20000):                 # ngoài dải chiều dài 1 đoạn (mm)
+            continue
+        if round(v) in _COMMON_ANGLES:             # góc uốn, không phải chiều dài
+            continue
+        if diameter and abs(v - diameter) < 0.5:   # trùng trị đường kính
+            continue
+        segs.append(v)
+    return segs
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. AI TABLE CLASSIFIER AGENT (AGENT PHÂN LOẠI BẢNG)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -375,6 +402,8 @@ class AECTableAuditor:
         col_qty = cls._find_col(headers, ["SO LUONG", "SO THANH", "SOLURGNG", "QTY", "SL"])
         col_tot_len = cls._find_col(headers, ["TONG CHIEU DAI", "TONG CD", "TOTAL LENGTH"])
         col_weight = cls._find_col(headers, ["TRONG LUONG", "KHOI LUONG", "WEIGHT", "KG"])
+        col_shape = cls._find_col(headers, ["HINH DANG", "SO DO UON", "CHI TIET UON", "HINH VE",
+                                            "SO DO THANH", "SHAPE", "BENDING", "HINH"])
 
         style = table.get("number_style", "unknown")
         cell_boxes = table.get("cell_boxes") or []
@@ -427,17 +456,30 @@ class AECTableAuditor:
                 _flag("duong_kinh_la", idx, mark_raw,
                       f"Đường kính Φ{dia_int} ngoài TCVN (có thể OCR đọc lệch).", col_dia)
 
-            # Chiều dài dạng công thức/biến (thanh uốn phức tạp) → không tính được, phải đối chiếu
-            if len_kind == "symbolic":
-                _flag("hinh_hoc_phuc_tap", idx, mark_raw,
-                      f"Chiều dài dạng công thức/biến ('{str(len_raw).strip()}') — cần đối chiếu "
-                      f"hình dạng thanh trên bản vẽ để tính khai triển.", col_len)
+            # Thanh uốn phức tạp: chiều dài dạng công thức/biến → THỬ SUY từ hình dạng (giá trị SHX)
+            row_len_unit = len_unit
+            shape_segs: List[float] = []
+            if length is None or len_kind == "symbolic":
+                if col_shape is not None and col_shape < len(row):
+                    shape_segs = shape_segments(row[col_shape], style, dia_int)
+                if len(shape_segs) >= 2 and 100 <= sum(shape_segs) <= 30000:
+                    length = sum(shape_segs)
+                    len_kind = "from_shape"
+                    row_len_unit = "mm"          # kích thước trên hình dạng luôn là mm
+                    _flag("khai_trien_tu_hinh", idx, mark_raw,
+                          f"Chiều dài khai triển SUY từ hình dạng (Σ {len(shape_segs)} đoạn = "
+                          f"{length:.0f}mm = {'+'.join(str(int(s)) for s in shape_segs)}). "
+                          f"Cần kiểm tra bù uốn/móc & loại góc.", col_shape)
+                elif len_kind == "symbolic":
+                    _flag("hinh_hoc_phuc_tap", idx, mark_raw,
+                          f"Chiều dài dạng công thức/biến ('{str(len_raw).strip()}') và không suy được "
+                          f"từ hình dạng — cần đối chiếu bản vẽ để tính khai triển.", col_len)
 
             unit_w = TCVN_REBAR_WEIGHTS.get(dia_int, (dia_int ** 2) / 162.0)
             calc_weight = None
             if length is not None and length > 0 and qty is not None and qty > 0:
-                # (3) Đổi đơn vị theo TIÊU ĐỀ cột, không đoán theo độ lớn
-                calc_len_m = _len_to_meters(length, len_unit) * qty
+                # (3) Đổi đơn vị theo TIÊU ĐỀ cột (hoặc mm nếu suy từ hình dạng)
+                calc_len_m = _len_to_meters(length, row_len_unit) * qty
                 calc_weight = calc_len_m * unit_w
                 total_weight_calculated += calc_weight
                 if dia_int <= 10:
@@ -466,10 +508,11 @@ class AECTableAuditor:
                 result["rebar_items"].append({
                     "mark": str(mark_raw),
                     "diameter": dia_int,
-                    "length_mm": int(round(_len_to_meters(length, len_unit) * 1000)),
+                    "length_mm": int(round(_len_to_meters(length, row_len_unit) * 1000)),
                     "quantity": int(round(qty)),
                     "total_weight_kg": round(calc_weight, 2),
-                    "length_kind": len_kind,
+                    "length_kind": len_kind,                         # number | formula | from_shape
+                    "shape_segments_mm": [int(round(s)) for s in shape_segs] or None,
                     "page": page,
                     "sheet": sheet,
                     "sheet_title": table.get("sheet_title", ""),
