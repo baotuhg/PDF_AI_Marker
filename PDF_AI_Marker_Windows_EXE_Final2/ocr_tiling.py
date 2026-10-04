@@ -203,7 +203,7 @@ def ocr_pil(engine, pil_img, factor: float, refiner=None) -> List[List[Any]]:
 
 
 def ocr_pdf_page(engine, page, refiner=None, with_image: bool = False):
-    """Render trang PDF ở RENDER_DPI, OCR theo ô, trả tọa độ ở hệ base_scale.
+    """Render trang PDF ở RENDER_DPI, OCR theo ô, tự động nhận diện & xoay đúng chiều, trả tọa độ ở hệ base_scale.
 
     refiner: đối tượng có .refine(pil_img, results) (vd. SuryaRefiner) để đọc
     lại dấu tiếng Việt trước khi quy đổi tọa độ.
@@ -214,6 +214,34 @@ def ocr_pdf_page(engine, page, refiner=None, with_image: bool = False):
     pil_img = page.render(scale=render_scale).to_pil()
     enhanced = enhance_contrast_clahe(pil_img)
     results = ocr_image_tiled(engine, enhanced)
+
+    # ── Tự động nhận biết trang bị xoay ngang / xoay dọc (Auto-Orientation) ──
+    # Nếu chữ thẳng đứng (chiều cao > 2 chiều rộng) áp đảo chữ nằm ngang -> trang bị nghiêng/xoay 90/270 độ
+    h_cnt = sum(1 for e in results if abs(e[0][1][0] - e[0][0][0]) >= 2.0 * abs(e[0][2][1] - e[0][1][1]) and abs(e[0][1][0] - e[0][0][0]) > 20)
+    v_cnt = sum(1 for e in results if abs(e[0][2][1] - e[0][1][1]) >= 2.0 * abs(e[0][1][0] - e[0][0][0]) and abs(e[0][2][1] - e[0][1][1]) > 20)
+    if v_cnt >= 12 and v_cnt > 2.0 * h_cnt:
+        # Thử xoay 90 độ
+        img_90 = page.render(scale=render_scale, rotation=90).to_pil()
+        enh_90 = enhance_contrast_clahe(img_90)
+        res_90 = ocr_image_tiled(engine, enh_90)
+        h_90 = sum(1 for e in res_90 if abs(e[0][1][0] - e[0][0][0]) >= 2.0 * abs(e[0][2][1] - e[0][1][1]) and abs(e[0][1][0] - e[0][0][0]) > 20)
+        v_90 = sum(1 for e in res_90 if abs(e[0][2][1] - e[0][1][1]) >= 2.0 * abs(e[0][1][0] - e[0][0][0]) and abs(e[0][2][1] - e[0][1][1]) > 20)
+        if h_90 > v_90 and h_90 > h_cnt:
+            pil_img = img_90
+            results = res_90
+            pw, ph = ph, pw
+        else:
+            # Thử xoay 270 độ nếu xoay 90 chưa đạt
+            img_270 = page.render(scale=render_scale, rotation=270).to_pil()
+            enh_270 = enhance_contrast_clahe(img_270)
+            res_270 = ocr_image_tiled(engine, enh_270)
+            h_270 = sum(1 for e in res_270 if abs(e[0][1][0] - e[0][0][0]) >= 2.0 * abs(e[0][2][1] - e[0][1][1]) and abs(e[0][1][0] - e[0][0][0]) > 20)
+            v_270 = sum(1 for e in res_270 if abs(e[0][2][1] - e[0][1][1]) >= 2.0 * abs(e[0][1][0] - e[0][0][0]) and abs(e[0][2][1] - e[0][1][1]) > 20)
+            if h_270 > v_270 and h_270 > h_cnt:
+                pil_img = img_270
+                results = res_270
+                pw, ph = ph, pw
+
     before = [e[1] for e in results]
     if refiner is not None and results:
         refiner.refine(pil_img, results)

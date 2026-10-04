@@ -716,19 +716,19 @@ def scattered_segments(items: List[Dict[str, Any]], gap_factor: float = 3.0) -> 
 TITLE_BLOCK_KW = [
     "HOSOTHIETKE", "CHUCDANH", "HOVATEN", "CHUKY", "TYLEBANVE", "BANVESO", "BANVES6", "BANVES0",
     "LANXUATBAN", "CNTK", "CHUNHIEM", "CHUNHIEMTHIETKE", "KIEMTRA", "GIAMDOC", "CHUDAUTU",
-    "TUVANTHIETKE", "DONVITUVAN", "COQUANTHIETKE", "DONVITHIETKE", "GOITHAU", "CONGTRINH",
-    "TENCONGTRINH", "HANGMUC", "SOAT", "CTTHIETKE", "THIETKE", "BANVETHICONG", "KYHIEUBANVE",
-    "TENBANVE", "GIAIDOANTHIETKE", "THEHIEN", "THIETKEBANVE", "QUANLYKYTHUAT", "THOIGIANHOANTHANH",
-    "NGAYHOANTHANH", "CANBOTHIETKE", "NGUOIVE", "NGUOIKIEM", "TRUONGPHONG", "BANVE"
+    "TUVANTHIETKE", "DONVITUVAN", "COQUANTHIETKE", "DONVITHIETKE", "GOITHAU", "TENCONGTRINH",
+    "SOAT", "CTTHIETKE", "BANVETHICONG", "KYHIEUBANVE", "TENBANVE", "GIAIDOANTHIETKE",
+    "THEHIEN", "THIETKEBANVE", "QUANLYKYTHUAT", "THOIGIANHOANTHANH", "NGAYHOANTHANH",
+    "CANBOTHIETKE", "NGUOIVE", "NGUOIKIEM", "TRUONGPHONG", "CHUTRIBOMON", "DONVITHAMTRA"
 ]
 TITLE_BLOCK_STRONG_KW = {
     "CHUCDANH", "HOVATEN", "CHUKY", "TYLEBANVE", "BANVESO", "BANVES6", "BANVES0", "LANXUATBAN",
     "CNTK", "KYHIEUBANVE", "TENBANVE", "CHUNHIEM", "CHUNHIEMTHIETKE", "GIAIDOANTHIETKE",
     "THEHIEN", "COQUANTHIETKE", "DONVITHIETKE", "CHUDAUTU", "GIAMDOC", "QUANLYKYTHUAT",
-    "TUVANTHIETKE"
+    "TUVANTHIETKE", "CHUTRIBOMON", "CANBOTHIETKE", "NGUOIVE", "NGUOIKIEM", "TRUONGPHONG"
 }
 STAMP_KW = ["THAMDINH", "PHEDUYET", "SOGIAOTHONG", "GIAOTHONGVANTAI", "VANTAI", "THEOVANBAN",
-            "QLCLCT", "KYTEN"]
+            "QLCLCT", "KYTEN", "THAMTRA", "KHOATHAMTRA", "BAOCAOKETQUA", "KETQUATHAMTRA", "DONVITHAMTRA"]
 
 COVER_PAGE_KW = [
     "HOSOTHIETKE", "THIETKEBANVETHICONG", "BANVETHICONG", "BAOCAOKINHTEKYTHUAT",
@@ -879,11 +879,24 @@ def find_title_block(items, grids, min_x, min_y, page_w, page_h):
     if len(hits) < 2 or not strong_hits:
         return [], []
 
+    # Khung tên CAD chuẩn:
+    # 1. Góc dưới phải (x0 >= min_x + 0.50*pw, y0 >= min_y + 0.60*ph)
+    # 2. Dải mép phải (x0 >= min_x + 0.75*pw, w <= 0.25*pw)
+    # 3. Dải đáy mép dưới (y0 >= min_y + 0.82*ph, h <= 0.18*ph)
+    # Tuyệt đối không nhận bảng số liệu phủ > 55% bề rộng trang mà không ở đáy
     matched_grids = []
     for g in grids:
         x0, y0, x1, y1 = g["bbox"]
+        w, h = x1 - x0, y1 - y0
+        if w > 0.55 * page_w and y0 < min_y + 0.80 * page_h:
+            continue
         inside = [a for a in anchors if x0 <= a["cx"] <= x1 and y0 <= a["cy"] <= y1]
-        if len(inside) >= 1 or (x0 >= min_x + 0.68 * page_w and y0 >= min_y + 0.60 * page_h):
+        is_br_corner = (x0 >= min_x + 0.50 * page_w and y0 >= min_y + 0.60 * page_h)
+        is_right_strip = (x0 >= min_x + 0.75 * page_w and w <= 0.25 * page_w)
+        is_bottom_strip = (y0 >= min_y + 0.82 * page_h and h <= 0.18 * page_h)
+        if not (is_br_corner or is_right_strip or is_bottom_strip):
+            continue
+        if len(inside) >= 2 or (len(inside) >= 1 and (is_right_strip or is_br_corner)):
             matched_grids.append(g)
 
     if matched_grids:
@@ -891,18 +904,19 @@ def find_title_block(items, grids, min_x, min_y, page_w, page_h):
         gy0 = min(g["bbox"][1] for g in matched_grids) - 5
         gx1 = max(g["bbox"][2] for g in matched_grids) + 5
         gy1 = max(g["bbox"][3] for g in matched_grids) + 5
-        all_x0 = [gx0] + [a["x_min"] for a in anchors]
-        all_y0 = [gy0] + [a["y_min"] for a in anchors]
-        all_x1 = [gx1] + [a["x_max"] for a in anchors]
-        all_y1 = [gy1] + [a["y_max"] for a in anchors]
-        region = (min(all_x0) - 5, min(all_y0) - 5, max(all_x1) + 5, max(all_y1) + 5)
+        region = (gx0, gy0, gx1, gy1)
+        tb_grids = matched_grids
     else:
-        pad = 2 * _median_h(anchors)
-        region = (min(a["x_min"] for a in anchors) - pad, min(a["y_min"] for a in anchors) - pad,
-                  max(a["x_max"] for a in anchors) + pad, max(a["y_max"] for a in anchors) + pad)
+        # Nếu không có lưới bao quanh khung tên, gom các anchor nằm đúng vùng khung tên
+        tb_anchors = [a for a in anchors if (a["cx"] >= min_x + 0.50 * page_w and a["cy"] >= min_y + 0.60 * page_h)
+                      or a["cx"] >= min_x + 0.75 * page_w or a["cy"] >= min_y + 0.82 * page_h]
+        if not tb_anchors:
+            return [], []
+        pad = 2 * _median_h(tb_anchors)
+        region = (min(a["x_min"] for a in tb_anchors) - pad, min(a["y_min"] for a in tb_anchors) - pad,
+                  max(a["x_max"] for a in tb_anchors) + pad, max(a["y_max"] for a in tb_anchors) + pad)
+        tb_grids = []
 
-    tb_grids = [g for g in grids if not (g["bbox"][2] < region[0] or g["bbox"][0] > region[2]
-                                         or g["bbox"][3] < region[1] or g["bbox"][1] > region[3])]
     tb_items = [it for it in items if region[0] <= it["cx"] <= region[2] and region[1] <= it["cy"] <= region[3]]
     return tb_items, tb_grids
 
@@ -912,7 +926,7 @@ def find_stamp(items, excluded_ids, page_w, page_h):
     pool = [it for it in items if id(it) not in excluded_ids]
     # Chữ neo phải ngắn (tiêu đề con dấu), không phải câu văn có cụm 'được phê duyệt'
     short = [it for it in pool if len(it["text"]) <= 40]
-    mains = [it for it in short if has_kw(it["text"], ["THAMDINH", "PHEDUYET"])] or \
+    mains = [it for it in short if has_kw(it["text"], ["THAMDINH", "PHEDUYET", "THAMTRA"])] or \
             [it for it in short if has_kw(it["text"], ["SOGIAOTHONG"])]
     if not mains:
         return []
@@ -1118,8 +1132,9 @@ def render_stamp(stamp_items) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 CAD_KW = ["TYLE", "MATDUNG", "MATBANG", "MATCAT", "CHITIET", "THONGKECOTTHEP", "THONGKECHITIET",
           "HOSOTHIETKE", "BANVETHICONG", "TVTK", "LANCAN", "THOATNUOC", "BANVESO", "CHUCDANH", "TRACDOC",
-          "TRACNGANG", "BOTRICOTTHEP"]
-VIEW_KW = ["MATDUNG", "MATBANG", "MATCAT", "CHITIET", "HOPTHU", "TRACDOC", "TRACNGANG", "BOTRI"]
+          "TRACNGANG", "BOTRICOTTHEP", "CATNGANG", "MATCATNGANG", "MCN", "NENDUONG", "DAPNEN", "DAONEN",
+          "TRACDIA", "TUVANXAYDUNG", "CHUTRI", "THAMTRA", "KYTEN", "THIETKE"]
+VIEW_KW = ["MATDUNG", "MATBANG", "MATCAT", "CHITIET", "HOPTHU", "TRACDOC", "TRACNGANG", "BOTRI", "CATNGANG", "MATCATNGANG"]
 
 
 def is_cad_drawing_sheet(items: List[Dict[str, Any]], page_w: float, page_h: float) -> bool:
@@ -1212,8 +1227,21 @@ def _grid_title(grid, items, excluded, med_h) -> Tuple[str, List[Dict[str, Any]]
     if not cands:
         return "", []
     lines = cluster_items_into_lines(cands)[-2:]
-    used = [it for l in lines for it in l["items"]]
-    return " ".join(" ".join(it["text"] for it in l["items"]) for l in lines).strip(), used
+    title_lines = []
+    for l in lines:
+        ltxt = " ".join(it["text"] for it in l["items"]).strip()
+        if any(kw in fold_key(ltxt) for kw in ["BANG", "THONGKE", "KHOILUONG", "DANHMUC", "TOADO", "BANGKE"]):
+            title_lines.append(l)
+    if not title_lines:
+        text_cands = [l for l in lines if not re.fullmatch(r"^[\d.,\s\-/+xX*#()]+$", " ".join(it["text"] for it in l["items"]).strip())]
+        title_lines = [text_cands[-1]] if text_cands else []
+    else:
+        title_lines = title_lines[-1:]
+    used = [it for l in title_lines for it in l["items"]]
+    title_res = " ".join(" ".join(it["text"] for it in l["items"]) for l in title_lines).strip()
+    if re.fullmatch(r"^[\d.,\s\-/+xX*#()]+$", title_res) or len(title_res) < 3:
+        return "", []
+    return title_res, used
 
 
 def is_suspicious_for_review(it: Dict[str, Any], stamp_ids: set, tb_ids: set) -> bool:
@@ -1356,7 +1384,7 @@ def analyze_page(ocr_res: List[Any], image=None, factor: float = 1.0, dpi: float
             continue
         gx0, gy0, gx1, gy1 = g["bbox"]
         g_items = [it for it in items if gx0 <= it["cx"] <= gx1 and gy0 <= it["cy"] <= gy1]
-        if any(has_kw(it["text"], ["THAMDINH", "PHEDUYET", "SOGIAOTHONG"]) for it in g_items):
+        if any(has_kw(it["text"], ["THAMDINH", "PHEDUYET", "SOGIAOTHONG", "THAMTRA"]) for it in g_items):
             continue
         in_grids.update(id(it) for it in g_items)
     stamp_items = find_stamp(items, excluded | in_grids, page_w, page_h)
