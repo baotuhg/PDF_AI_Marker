@@ -146,6 +146,81 @@ def test_dem_so_lan_sua_tang_dan():
     assert e.knowledge["ocr_corrections"]["coc khoan nhoi"]["count"] == 2
 
 
+# ── (G) HUẤN LUYỆN TỪ KHÁC BIỆT: sửa thẳng noi_dung.md ────────────────────────
+AI_MD = (
+    "Ket cau be tong cot thep chiu lyrc chinh.\n"
+    "Mac be tong 300, chieu dai 25 m.\n"
+)
+# Người dùng sửa: 'chiu lyrc' -> 'chịu lực' (chữ) ; '25' -> '26' (số)
+FIXED_MD = (
+    "Ket cau be tong cot thep chịu lực chinh.\n"
+    "Mac be tong 300, chieu dai 26 m.\n"
+)
+
+
+def test_hoc_tu_khac_biet_sua_chu():
+    e = _fresh_engine()
+    st = e.learn_from_markdown_diff(AI_MD, FIXED_MD, source="hs")
+    assert st["learned"] >= 1, st
+    assert e.get_safe_corrections().get("chiu lyrc") == "chịu lực"
+
+
+def test_diff_sua_so_chi_truy_vet():
+    e = _fresh_engine()
+    st = e.learn_from_markdown_diff(AI_MD, FIXED_MD, source="hs")
+    assert st["numeric"] >= 1, st
+    # cặp số KHÔNG được vào danh sách tự áp dụng
+    assert all(not any(ch.isdigit() for ch in k) for k in e.get_safe_corrections())
+
+
+def test_diff_bo_qua_dong_them_bot():
+    """Thêm/bớt DÒNG (cấu trúc, thứ tự đọc) không bị học thành luật tìm-thay-thế."""
+    e = _fresh_engine()
+    ai = "Dong mot giong nhau.\nDong hai giong nhau.\n"
+    co = "Dong mot giong nhau.\nDong hai giong nhau.\nDong moi them vao.\n"
+    st = e.learn_from_markdown_diff(ai, co)
+    assert st["learned"] == 0 and st["numeric"] == 0, st
+
+
+def test_diff_bo_qua_viet_lai_ca_cau():
+    """Viết lại cả câu (nhiều từ) không được học (không tổng quát hóa được)."""
+    e = _fresh_engine()
+    ai = "Cau nay bi doc sai gan nhu hoan toan boi phan mem.\n"
+    co = "Day la mot cau hoan toan khac do con nguoi viet lai tu dau.\n"
+    st = e.learn_from_markdown_diff(ai, co)
+    assert st["learned"] == 0, st
+
+
+def test_learn_from_result_folder_va_khong_hoc_lai():
+    import tempfile, os
+    from pathlib import Path
+    e = _fresh_engine()
+    d = Path(tempfile.mkdtemp(prefix="marker_"))
+    (d / "noi_dung.ai.md").write_text(AI_MD, encoding="utf-8")
+    (d / "noi_dung.md").write_text(FIXED_MD, encoding="utf-8")
+    st1 = e.learn_from_result_folder(d)
+    assert st1["learned"] >= 1, st1
+    st2 = e.learn_from_result_folder(d)   # lần 2: đã có dấu .learned
+    assert st2.get("reason") == "đã học bản sửa này rồi", st2
+
+
+def test_ap_dung_corrections_len_markdown_moi():
+    """Sửa lỗi đã học được ÁP DỤNG lên markdown của hồ sơ SAU (đúng form cuối cùng)."""
+    e = _fresh_engine()
+    e.learn_from_markdown_diff(
+        "Ket cau chiu lyrc chinh.\n", "Ket cau chịu lực chinh.\n", source="hs1")
+    out = e.apply_corrections_to_text("## Trang 2\nDam T2 chiu lyrc rat lon.\n")
+    assert "chịu lực" in out, out
+
+
+def test_ap_dung_khong_dung_cho_so():
+    """Các sửa liên quan SỐ không được tự áp dụng lên hồ sơ mới."""
+    e = _fresh_engine()
+    e.learn_from_markdown_diff("Dai 25 m.\n", "Dai 26 m.\n")
+    out = e.apply_corrections_to_text("Chieu dai 25 m toan tuyen.\n")
+    assert "25" in out and "26" not in out, out
+
+
 # ── Hàm phụ trợ ───────────────────────────────────────────────────────────────
 def test_acronym_matches():
     assert AECExperienceEngine._acronym_matches("BTCT", "Bê tông cốt thép") is True

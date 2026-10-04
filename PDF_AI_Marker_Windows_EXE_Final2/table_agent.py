@@ -104,6 +104,128 @@ def _extract_number(val: Any) -> Optional[float]:
     return None
 
 
+def _num_token(tok: str, style: str = "unknown") -> Optional[float]:
+    """Đọc một số theo phong cách VN/US (1.525 nghìn, 2,5 thập phân…)."""
+    tok = (tok or "").strip()
+    if not tok:
+        return None
+    if "." in tok and "," in tok:
+        dec = "," if tok.rfind(",") > tok.rfind(".") else "."
+        tok = tok.replace("." if dec == "," else ",", "").replace(dec, ".")
+    elif "," in tok:
+        if tok.count(",") == 1 and len(tok.split(",")[-1]) <= 2 and style != "us":
+            tok = tok.replace(",", ".")
+        else:
+            tok = tok.replace(",", "")
+    elif "." in tok:
+        if style == "vn" and re.fullmatch(r"\d{1,3}\.\d{3}", tok):
+            tok = tok.replace(".", "")           # dấu chấm phân nghìn kiểu VN (1.200 = 1200)
+    try:
+        return float(tok)
+    except ValueError:
+        return None
+
+
+def _safe_eval_arith(expr: str, style: str = "unknown") -> Optional[float]:
+    """Tính biểu thức số học CHỈ gồm + - * ( ) và số (tự viết, KHÔNG dùng eval).
+    Phục vụ ô 'chiều dài' dạng tổ hợp đoạn của thanh uốn: '1200+2*300+2*150' -> 2100."""
+    toks = re.findall(r"\d[\d.,]*|[+\-*()]", expr)
+    if not toks:
+        return None
+    pos = 0
+
+    def peek():
+        return toks[pos] if pos < len(toks) else None
+
+    def factor():
+        nonlocal pos
+        t = peek()
+        if t is None or t in ("+", "-", "*", ")"):
+            return None
+        if t == "(":
+            pos += 1
+            v = expr_()
+            if peek() == ")":
+                pos += 1
+            return v
+        pos += 1
+        return _num_token(t, style)
+
+    def term():
+        nonlocal pos
+        v = factor()
+        if v is None:
+            return None
+        while peek() == "*":
+            pos += 1
+            r = factor()
+            if r is None:
+                return None
+            v *= r
+        return v
+
+    def expr_():
+        nonlocal pos
+        v = term()
+        if v is None:
+            return None
+        while peek() in ("+", "-"):
+            op = peek(); pos += 1
+            r = term()
+            if r is None:
+                return None
+            v = v + r if op == "+" else v - r
+        return v
+
+    v = expr_()
+    return v if pos == len(toks) else None     # còn token thừa -> biểu thức hỏng
+
+
+def parse_length_expr(raw: Any, style: str = "unknown") -> Tuple[Optional[float], str]:
+    """Đọc ô CHIỀU DÀI. Trả (giá_trị, loại) với loại:
+      'number'   — một con số;
+      'formula'  — tổ hợp đoạn tính được (thanh uốn phức tạp);
+      'symbolic' — còn biến/chữ (a+2b…) hoặc công thức hỏng → KHÔNG tính (cần hình dạng);
+      'empty'    — rỗng."""
+    if raw is None:
+        return None, "empty"
+    s = str(raw).strip()
+    if not s:
+        return None, "empty"
+    cleaned = re.sub(r"(?i)(chieu dai|chiều dài|gom moc|gồm móc|l\s*=|cd\s*=|mm|cm|\bm\b)", "", s.lower())
+    cleaned = cleaned.replace("×", "*").replace("x", "*")
+    cleaned = re.sub(r"[–—−]", "-", cleaned)
+    if re.search(r"[a-zà-ỹ]", cleaned):                 # còn biến/chữ -> cần hình học
+        return None, "symbolic"
+    if re.search(r"[+*()]", cleaned):
+        v = _safe_eval_arith(cleaned, style)
+        return (v, "formula") if v is not None else (None, "symbolic")
+    v = _num_token(cleaned.strip(), style)
+    return (v, "number") if v is not None else (None, "empty")
+
+
+def _detect_len_unit(header_cell: str) -> Optional[str]:
+    """Đơn vị chiều dài đọc từ TIÊU ĐỀ cột ('CD (mm)', 'L (m)'…) thay vì đoán theo độ lớn."""
+    t = (header_cell or "").lower()
+    if "mm" in t:
+        return "mm"
+    if "cm" in t:
+        return "cm"
+    if re.search(r"\(m\)|\bm\b", t):
+        return "m"
+    return None
+
+
+def _len_to_meters(length: float, unit: Optional[str]) -> float:
+    if unit == "mm":
+        return length / 1000.0
+    if unit == "cm":
+        return length / 100.0
+    if unit == "m":
+        return length
+    return length / 1000.0 if length > 100 else length   # dự phòng khi tiêu đề không ghi đơn vị
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. AI TABLE CLASSIFIER AGENT (AGENT PHÂN LOẠI BẢNG)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -254,9 +376,30 @@ class AECTableAuditor:
         col_tot_len = cls._find_col(headers, ["TONG CHIEU DAI", "TONG CD", "TOTAL LENGTH"])
         col_weight = cls._find_col(headers, ["TRONG LUONG", "KHOI LUONG", "WEIGHT", "KG"])
 
+        style = table.get("number_style", "unknown")
+        cell_boxes = table.get("cell_boxes") or []
+        len_unit = _detect_len_unit(headers[col_len]) if col_len is not None else None
+        page = table.get("page", 1)
+        sheet = table.get("sheet", "")
+        detail = result.setdefault("warnings_detail", [])
+
+        def _bbox(row_i0, col):
+            try:
+                if col is not None and row_i0 < len(cell_boxes):
+                    return cell_boxes[row_i0][col]
+            except (IndexError, TypeError):
+                pass
+            return None
+
+        def _flag(kind, idx, mark, msg, col):
+            result["warnings"].append(f"Dòng {idx} ({mark}): {msg}")
+            detail.append({"page": page, "sheet": sheet, "row": idx, "mark": str(mark),
+                           "kind": kind, "message": msg, "bbox": _bbox(idx - 1, col)})
+
         total_weight_reported = 0.0
         total_weight_calculated = 0.0
         weight_by_group = {"d_le_10": 0.0, "d_le_18": 0.0, "d_gt_18": 0.0}
+        last_dia = None                       # để truyền ô ĐƯỜNG KÍNH gộp theo hàng
 
         for idx, row in enumerate(rows, 1):
             dia_raw = row[col_dia] if (col_dia is not None and col_dia < len(row)) else None
@@ -266,30 +409,37 @@ class AECTableAuditor:
             mark_raw = row[col_mark] if (col_mark is not None and col_mark < len(row)) else f"Thanh {idx}"
 
             dia = _extract_number(dia_raw)
-            length = _extract_number(len_raw)
+            length, len_kind = parse_length_expr(len_raw, style)
             qty = _extract_number(qty_raw)
             weight = _extract_number(wt_raw)
 
+            # (2) Truyền ô gộp theo HÀNG: dòng có dữ liệu nhưng trống đường kính
+            #     => thuộc ô đường kính gộp ở trên (không loại thầm dòng nữa).
+            if dia is None and last_dia is not None and (length is not None or qty is not None):
+                dia = last_dia
+            if dia is not None:
+                last_dia = dia
             if dia is None:
                 continue
 
             dia_int = int(round(dia))
-            # 1. Phát hiện đường kính lạ
             if dia_int not in TCVN_REBAR_WEIGHTS:
-                result["warnings"].append(
-                    f"Dòng {idx} ({mark_raw}): Đường kính Φ{dia_int} bất thường ngoài TCVN (có thể OCR đọc lệch)."
-                )
+                _flag("duong_kinh_la", idx, mark_raw,
+                      f"Đường kính Φ{dia_int} ngoài TCVN (có thể OCR đọc lệch).", col_dia)
+
+            # Chiều dài dạng công thức/biến (thanh uốn phức tạp) → không tính được, phải đối chiếu
+            if len_kind == "symbolic":
+                _flag("hinh_hoc_phuc_tap", idx, mark_raw,
+                      f"Chiều dài dạng công thức/biến ('{str(len_raw).strip()}') — cần đối chiếu "
+                      f"hình dạng thanh trên bản vẽ để tính khai triển.", col_len)
 
             unit_w = TCVN_REBAR_WEIGHTS.get(dia_int, (dia_int ** 2) / 162.0)
-            calc_len_m = 0.0
-            if length is not None and qty is not None:
-                # Nếu chiều dài ghi bằng mm (> 100) thì đổi sang m
-                l_m = (length / 1000.0) if length > 100 else length
-                calc_len_m = l_m * qty
+            calc_weight = None
+            if length is not None and length > 0 and qty is not None and qty > 0:
+                # (3) Đổi đơn vị theo TIÊU ĐỀ cột, không đoán theo độ lớn
+                calc_len_m = _len_to_meters(length, len_unit) * qty
                 calc_weight = calc_len_m * unit_w
                 total_weight_calculated += calc_weight
-
-                # Phân nhóm đường kính
                 if dia_int <= 10:
                     weight_by_group["d_le_10"] += calc_weight
                 elif dia_int <= 18:
@@ -297,31 +447,50 @@ class AECTableAuditor:
                 else:
                     weight_by_group["d_gt_18"] += calc_weight
 
-                # 2. Đối chiếu trọng lượng tính toán vs ghi trên bảng
-                if weight is not None:
+                if weight is not None and weight > 0:
                     total_weight_reported += weight
-                    if weight > 0 and abs(weight - calc_weight) / weight > 0.08:
-                        result["warnings"].append(
-                            f"Dòng {idx} ({mark_raw}): Bảng ghi {weight:.1f}kg, tính toán TCVN là {calc_weight:.1f}kg (lệch >8%)."
-                        )
+                    if abs(weight - calc_weight) / weight > 0.08:
+                        _flag("lech_trong_luong", idx, mark_raw,
+                              f"Bảng ghi {weight:.1f}kg, tính toán TCVN {calc_weight:.1f}kg "
+                              f"(Φ{dia_int}×{calc_len_m:.2f}m, lệch >8%).", col_weight)
 
-                # Thu thập bản ghi phục vụ aec-rebar-optimizer
+                # (4) Đối chiếu cột 'Tổng chiều dài' nếu có
+                if col_tot_len is not None and col_tot_len < len(row):
+                    tl, _k = parse_length_expr(row[col_tot_len], style)
+                    if tl is not None and tl > 0:
+                        tl_m = _len_to_meters(tl, len_unit)
+                        if abs(tl_m - calc_len_m) / max(tl_m, calc_len_m) > 0.08:
+                            _flag("lech_tong_dai", idx, mark_raw,
+                                  f"Tổng chiều dài ghi {tl_m:.2f}m ≠ (chiều dài×số lượng)={calc_len_m:.2f}m.",
+                                  col_tot_len)
                 result["rebar_items"].append({
                     "mark": str(mark_raw),
                     "diameter": dia_int,
-                    "length_mm": int(round(length if length > 100 else length * 1000)),
+                    "length_mm": int(round(_len_to_meters(length, len_unit) * 1000)),
                     "quantity": int(round(qty)),
                     "total_weight_kg": round(calc_weight, 2),
-                    "page": table.get("page", 1),
-                    "sheet": table.get("sheet", ""),
+                    "length_kind": len_kind,
+                    "page": page,
+                    "sheet": sheet,
                     "sheet_title": table.get("sheet_title", ""),
                 })
+
+        # Kiểm tra chéo Ở MỨC BẢNG: tổng ghi vs tổng tính
+        if total_weight_reported > 0 and total_weight_calculated > 0:
+            diff = abs(total_weight_reported - total_weight_calculated) / total_weight_reported
+            if diff > 0.05:
+                msg = (f"Tổng trọng lượng bảng ghi {total_weight_reported:.1f}kg ≠ tổng tính toán "
+                       f"{total_weight_calculated:.1f}kg (lệch {diff*100:.1f}%).")
+                result["warnings"].append(msg)
+                detail.append({"page": page, "sheet": sheet, "row": 0, "mark": "TỔNG BẢNG",
+                               "kind": "lech_tong_bang", "message": msg, "bbox": None})
 
         result["rebar_summary"] = {
             "total_bars": len(result["rebar_items"]),
             "calc_weight_kg": round(total_weight_calculated, 2),
             "reported_weight_kg": round(total_weight_reported, 2) if total_weight_reported > 0 else None,
             "weight_by_group": {k: round(v, 2) for k, v in weight_by_group.items()},
+            "length_unit": len_unit or "auto",
         }
         if result["warnings"]:
             result["status"] = "warning"

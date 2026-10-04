@@ -239,7 +239,7 @@ def run_fast_text(request, session):
                 ocr_reasons[reason] = ocr_reasons.get(reason, 0) + 1
                 method += f"+ocr_{reason}"
 
-            analysis = analyze_page(boxes, image=image, factor=factor, dpi=dpi)
+            analysis = analyze_page(boxes, image=image, factor=factor, dpi=dpi, page_num=page_num + 1)
             rec = page_record(page_num + 1, method, analysis, geom=_geom(pw, ph, scale, k))
             if reason:
                 rec["warnings"].append(
@@ -315,7 +315,7 @@ def run_rapid_ocr(request, session, vietnamese=False):
             if shx:
                 res = merge_boxes(shx, res)
             try:
-                analysis = analyze_page(res, image=image, factor=factor, dpi=RENDER_DPI)
+                analysis = analyze_page(res, image=image, factor=factor, dpi=RENDER_DPI, page_num=page_num + 1)
             except Exception as e:
                 emit("progress", message=f"[Cảnh báo bố cục P{page_num + 1}]: {type(e).__name__}: {e}")
                 raw = "\n".join(str(r[1]).strip() for r in res if r and str(r[1]).strip())
@@ -449,6 +449,40 @@ def review_markdown(pages):
             out.append(f"- `{x['text']}` (điểm {x['score']}, vị trí {x['bbox']})")
         out.append("")
     return "\n".join(out) if len(out) > 4 else "Không có mục nào cần đối chiếu.\n"
+
+
+def _write_numeric_audit_report(tables, path):
+    """Gom mọi cảnh báo thẩm tra số liệu bảng thành báo cáo kèm trang/bản vẽ/tọa độ."""
+    kind_label = {
+        "lech_trong_luong": "Lệch trọng lượng (bảng ghi vs tính TCVN)",
+        "hinh_hoc_phuc_tap": "Hình học phức tạp — chiều dài dạng công thức/biến",
+        "duong_kinh_la": "Đường kính ngoài TCVN",
+        "lech_tong_dai": "Lệch tổng chiều dài (≠ dài×số lượng)",
+        "lech_tong_bang": "Lệch tổng trọng lượng toàn bảng",
+    }
+    rows = [d for t in tables for d in (t.get("audit", {}) or {}).get("warnings_detail", [])]
+    out = ["# KIỂM TRA SỐ LIỆU BẢNG (TỰ ĐỘNG ĐỐI CHIẾU)", "",
+           "Các mục số liệu nghi ngờ do engine thẩm tra chéo. Mở “Đối chiếu trực quan” → tab Bảng số liệu, "
+           "bấm vào ô để nhảy tới vị trí trên bản vẽ gốc.", ""]
+    if not rows:
+        out.append("✅ Không phát hiện sai lệch số liệu đáng kể.")
+    else:
+        out.append(f"⚠️ Tổng cộng **{len(rows)}** mục cần đối chiếu.\n")
+        by_page = {}
+        for d in rows:
+            by_page.setdefault(d.get("page", 0), []).append(d)
+        for pg in sorted(by_page):
+            out.append(f"## Trang {pg}")
+            for d in by_page[pg]:
+                lbl = kind_label.get(d.get("kind"), d.get("kind", ""))
+                bbox = d.get("bbox")
+                loc = f" — vị trí {bbox}" if bbox else ""
+                out.append(f"- **[{lbl}]** {d.get('mark', '')}: {d.get('message', '')}{loc}")
+            out.append("")
+    try:
+        path.write_text("\n".join(out), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def export_tables_to_excel(tables, excel_path: Path):
@@ -608,7 +642,16 @@ def write_outputs(result, mode, source, total, pages, chunks, total_sec, max_cha
     except Exception:
         pass  # Neu loi, giu markdown goc
     # ────────────────────────────────────────────────────────────────────────────
+    # 🎓 Áp dụng các SỬA LỖI CHỮ đã học (từ những hồ sơ bạn chỉnh trước đó) lên markdown cuối.
+    try:
+        from experience_engine import get_experience_engine
+        full_md = get_experience_engine().apply_corrections_to_text(full_md)
+    except Exception:
+        pass
     (result / "noi_dung.md").write_text(full_md, encoding="utf-8")
+    # Bản AI GỐC (chỉ-đọc) để đối chiếu khi người dùng sửa noi_dung.md → dùng cho HUẤN LUYỆN.
+    # KHÔNG sửa file này; sửa trực tiếp trong noi_dung.md. (Đã gồm các sửa lỗi học được → baseline tiến dần.)
+    (result / "noi_dung.ai.md").write_text(full_md, encoding="utf-8")
     (result / "noi_dung.txt").write_text(
         "\n\n".join(f"[Trang {p['page']}]\n{p['text']}" for p in pages), encoding="utf-8")
     payload = {
@@ -636,6 +679,9 @@ def write_outputs(result, mode, source, total, pages, chunks, total_sec, max_cha
                 tbl["audit"] = AECTableAuditor.audit(tbl, cat)
             export_aec_excel(tables, result / "bang_so_lieu.xlsx")
             export_specialized_jsons(tables, result)
+            # Báo cáo KIỂM TRA SỐ LIỆU: gom mọi cảnh báo audit (lệch trọng lượng, hình học
+            # phức tạp, đường kính lạ…) kèm trang/bản vẽ/tọa độ để đối chiếu nhanh.
+            _write_numeric_audit_report(tables, result / "kiem_tra_so_lieu.md")
         except Exception as e:
             emit("progress", message=f"[Cảnh báo AEC Table Agent: {e}]")
 
@@ -683,6 +729,18 @@ def run(request, session):
     if not ok:
         raise PermissionError("LỖI BẢN QUYỀN: Phần mềm chưa được kích hoạt bản quyền hợp lệ.")
     # ───────────────────────────────────────────────────────────────────
+    # 🎓 TỰ CẬP NHẬT: trước khi đọc hồ sơ mới, học từ các hồ sơ bạn đã SỬA noi_dung.md
+    dest = request.get("destination", "")
+    if dest:
+        try:
+            from experience_engine import get_experience_engine
+            agg = get_experience_engine().scan_and_learn(dest)
+            if agg.get("learned") or agg.get("numeric"):
+                emit("progress", message=(
+                    f"[🎓 Tự học từ bản bạn sửa] Rút {agg['learned']} sửa lỗi chữ + "
+                    f"{agg['numeric']} sửa số (truy vết) từ {agg['folders']} hồ sơ đã chỉnh."))
+        except Exception as e:
+            emit("progress", message=f"[Cảnh báo tự học từ bản sửa: {e}]")
     mode = request.get("mode", "auto")
     max_chars = int(request.get("chunk_size") or 3000)
     chunks = []

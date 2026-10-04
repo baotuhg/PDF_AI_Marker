@@ -297,7 +297,7 @@ class AECExperienceEngine:
         return bool(re.search(r"\d", s or ""))
 
     def learn_ocr_correction(self, raw: str, corrected: str, source: str = "",
-                             min_len: int = 2) -> Dict[str, Any]:
+                             min_len: int = 2, persist: bool = True) -> Dict[str, Any]:
         """
         Học MỘT cặp sửa lỗi OCR do NGƯỜI dùng xác nhận trong màn Đối chiếu (có giám sát).
 
@@ -327,7 +327,8 @@ class AECExperienceEngine:
             entry["safe"] = safe
             entry["source"] = source or entry.get("source", "")
         entry["count"] = entry.get("count", 0) + 1
-        self.save_db()
+        if persist:
+            self.save_db()
 
         # Nạp nóng vào bộ khôi phục dấu đang chạy (nếu có) để hiệu lực ngay
         if safe:
@@ -353,6 +354,134 @@ class AECExperienceEngine:
             elif not self._has_digit(raw):   # schema cũ dạng chuỗi
                 out[raw] = str(e)
         return out
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # HUẤN LUYỆN TỪ KHÁC BIỆT: người dùng SỬA THẲNG noi_dung.md → tool tự học
+    # ─────────────────────────────────────────────────────────────────────────
+    _EDGE_PUNCT = " \t.,;:!?()[]{}\"'«»…·•-–—|*#>"
+
+    def _consider_pair(self, old: str, new: str, source: str, max_words: int,
+                       stats: Dict[str, int]):
+        # Cắt dấu câu/markdown ở HAI ĐẦU để cặp học tổng quát được (neo \b hoạt động đúng,
+        # vd 'chiu lyrc,' -> 'chiu lyrc'); giữ nguyên dấu bên trong từ.
+        old = old.strip(self._EDGE_PUNCT)
+        new = new.strip(self._EDGE_PUNCT)
+        if not old or not new or old == new:
+            stats["skipped"] += 1
+            return
+        # Cả câu viết lại → KHÔNG học (chỉ học sửa mức từ/cụm ngắn, mới tổng quát hóa được)
+        if len(old.split()) > max_words or len(new.split()) > max_words:
+            stats["skipped"] += 1
+            return
+        # Chỉ toàn ký hiệu/markdown (| # * …) → bỏ
+        if re.fullmatch(r"[\W_]+", old) or re.fullmatch(r"[\W_]+", new):
+            stats["skipped"] += 1
+            return
+        res = self.learn_ocr_correction(old, new, source=source, persist=False)
+        if not res.get("stored"):
+            stats["skipped"] += 1
+        elif res.get("safe"):
+            stats["learned"] += 1      # cặp CHỮ → sẽ tự áp dụng cho hồ sơ sau
+        else:
+            stats["numeric"] += 1      # cặp có SỐ → chỉ lưu truy vết, không tổng quát hóa
+
+    def learn_from_markdown_diff(self, ai_text: str, corrected_text: str,
+                                 source: str = "", max_words: int = 6) -> Dict[str, int]:
+        """
+        Học từ KHÁC BIỆT giữa bản AI xuất ra (`ai_text`) và bản người dùng SỬA ĐÚNG
+        (`corrected_text`). Biến việc sửa file `noi_dung.md` thành dữ liệu huấn luyện.
+
+        Chỉ học sửa ở DÒNG THAY ĐỔI (opcode 'replace'); dòng được THÊM/BỚT bị bỏ qua vì đó là
+        thay đổi cấu trúc/thứ-tự-đọc — không thể tổng quát hóa bằng tìm-thay-thế. Trong mỗi dòng,
+        chỉ lấy các cụm từ bị đổi (token-level), lọc an toàn qua `learn_ocr_correction`.
+        """
+        import difflib
+        stats = {"learned": 0, "numeric": 0, "skipped": 0}
+        if not ai_text or not corrected_text or ai_text == corrected_text:
+            return stats
+        ai_lines = ai_text.splitlines()
+        co_lines = corrected_text.splitlines()
+        for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(
+                a=ai_lines, b=co_lines, autojunk=False).get_opcodes():
+            if tag != "replace":
+                continue
+            ot = " ".join(ai_lines[i1:i2]).split()
+            nt = " ".join(co_lines[j1:j2]).split()
+            for t, a1, a2, b1, b2 in difflib.SequenceMatcher(
+                    a=ot, b=nt, autojunk=False).get_opcodes():
+                if t == "replace":
+                    self._consider_pair(" ".join(ot[a1:a2]), " ".join(nt[b1:b2]),
+                                        source, max_words, stats)
+        self.save_db()
+        return stats
+
+    def learn_from_result_folder(self, folder) -> Dict[str, Any]:
+        """Học từ một thư mục kết quả (*_Marker): so `noi_dung.ai.md` (bản AI gốc) với
+        `noi_dung.md` (bản người dùng đã sửa). Ghi dấu `.learned` để không học lại cùng bản sửa."""
+        from pathlib import Path
+        import hashlib
+        folder = Path(folder)
+        ai_f, cur_f = folder / "noi_dung.ai.md", folder / "noi_dung.md"
+        if not ai_f.exists() or not cur_f.exists():
+            return {"learned": 0, "numeric": 0, "skipped": 0, "reason": "thiếu noi_dung.ai.md / noi_dung.md"}
+        ai_text = ai_f.read_text(encoding="utf-8", errors="ignore")
+        cur_text = cur_f.read_text(encoding="utf-8", errors="ignore")
+        if ai_text == cur_text:
+            return {"learned": 0, "numeric": 0, "skipped": 0, "reason": "chưa chỉnh sửa gì"}
+        cur_hash = hashlib.sha256(cur_text.encode("utf-8")).hexdigest()
+        marker = folder / ".learned"
+        try:
+            if marker.exists() and marker.read_text(encoding="utf-8").strip() == cur_hash:
+                return {"learned": 0, "numeric": 0, "skipped": 0, "reason": "đã học bản sửa này rồi"}
+        except Exception:
+            pass
+        stats = self.learn_from_markdown_diff(ai_text, cur_text, source=folder.name)
+        try:
+            marker.write_text(cur_hash, encoding="utf-8")
+        except Exception:
+            pass
+        return stats
+
+    def scan_and_learn(self, output_root) -> Dict[str, int]:
+        """Quét mọi thư mục `*_Marker` trong thư mục xuất, tự học từ các hồ sơ đã được sửa.
+        Gọi ở đầu mỗi lần chuyển đổi → 'tự cập nhật sau mỗi lần đọc hồ sơ mới'."""
+        from pathlib import Path
+        agg = {"folders": 0, "learned": 0, "numeric": 0, "skipped": 0}
+        try:
+            out = Path(output_root)
+            if not out.exists():
+                return agg
+            for d in sorted(out.glob("*_Marker")):
+                if not d.is_dir():
+                    continue
+                st = self.learn_from_result_folder(d)
+                if st.get("learned") or st.get("numeric"):
+                    agg["folders"] += 1
+                    agg["learned"] += st.get("learned", 0)
+                    agg["numeric"] += st.get("numeric", 0)
+                    agg["skipped"] += st.get("skipped", 0)
+        except Exception as e:
+            print(f"[ExperienceEngine] scan_and_learn lỗi: {e}")
+        return agg
+
+    def apply_corrections_to_text(self, text: str) -> str:
+        """Áp dụng các sửa lỗi CHỮ an toàn (đã học) lên markdown CUỐI CÙNG của hồ sơ mới.
+        Literal, giữ kiểu hoa/thường; keyed theo đúng dạng văn bản người dùng đã sửa."""
+        if not text:
+            return text
+        try:
+            from vn_diacritics import _apply_correction
+        except Exception:
+            def _apply_correction(span, corrected):   # fallback đơn giản
+                return corrected
+        for raw, corrected in self.get_safe_corrections().items():
+            pat = r"\b" + r"\s+".join(re.escape(w) for w in raw.split()) + r"\b"
+            try:
+                text = re.sub(pat, lambda m, c=corrected: _apply_correction(m.group(0), c),
+                              text, flags=re.IGNORECASE)
+            except re.error:
+                continue
+        return text
 
     def record_epoch(self, doc_name: str, pages_count: int, lessons: Dict[str, Any]):
         """Ghi nhận phiên học tập hoàn thành một hồ sơ."""

@@ -254,6 +254,12 @@ class InspectorWindow(QMainWindow):
         self.btn_chat.setStyleSheet("QPushButton { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; font-weight: 600; } QPushButton:hover { background: #dbeafe; }")
         self.btn_chat.clicked.connect(self.open_chat)
         bar.addWidget(self.btn_chat)
+        self.btn_learn = QPushButton("📚 Học từ bản tôi đã sửa")
+        self.btn_learn.setToolTip("So noi_dung.md (bản bạn đã sửa) với bản AI gốc (noi_dung.ai.md) "
+                                  "để tự rút ra các sửa lỗi chữ và áp dụng cho hồ sơ sau.")
+        self.btn_learn.setStyleSheet("QPushButton { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; font-weight: 600; } QPushButton:hover { background: #dcfce7; }")
+        self.btn_learn.clicked.connect(self._learn_from_edits)
+        bar.addWidget(self.btn_learn)
         self.lbl_file = QLabel("Chưa mở kết quả")
         self.lbl_file.setStyleSheet("font-weight: 600; color: #0f2d59; padding-left: 8px;")
         bar.addWidget(self.lbl_file, 1)
@@ -791,6 +797,32 @@ class InspectorWindow(QMainWindow):
         else:
             self.statusBar().showMessage(f"✅ Đã lưu sửa “{raw}” → “{new}” (có chữ số: chỉ lưu truy vết, "
                                          f"KHÔNG tự áp dụng cho hồ sơ khác để tránh sai số liệu).")
+
+    def _learn_from_edits(self):
+        """Học từ chính bản noi_dung.md người dùng đã sửa (so với bản AI gốc noi_dung.ai.md)."""
+        folder = getattr(self, "result_dir", None)
+        if not folder:
+            QMessageBox.information(self, "Học từ bản đã sửa", "Hãy mở một thư mục kết quả (*_Marker) trước.")
+            return
+        if not (Path(folder) / "noi_dung.ai.md").exists():
+            QMessageBox.information(self, "Học từ bản đã sửa",
+                                    "Thư mục này chưa có 'noi_dung.ai.md' (bản AI gốc).\n"
+                                    "Hồ sơ cần được chuyển đổi lại bằng phiên bản mới để tạo bản gốc đối chiếu.")
+            return
+        try:
+            from experience_engine import get_experience_engine
+            st = get_experience_engine().learn_from_result_folder(folder)
+        except Exception as e:
+            QMessageBox.warning(self, "Học từ bản đã sửa", f"Lỗi: {e}")
+            return
+        if st.get("reason"):
+            QMessageBox.information(self, "Học từ bản đã sửa", f"Không có gì để học: {st['reason']}.")
+        else:
+            QMessageBox.information(self, "Học từ bản đã sửa",
+                                   f"✅ Đã học {st['learned']} sửa lỗi chữ (tự áp dụng cho hồ sơ sau)\n"
+                                   f"• {st['numeric']} sửa số: chỉ lưu truy vết, không tổng quát hóa\n"
+                                   f"• {st['skipped']} thay đổi bỏ qua (cả câu / cấu trúc / ký hiệu)")
+            self.statusBar().showMessage(f"📚 Đã học {st['learned']} sửa lỗi chữ từ bản bạn chỉnh.")
 
     # ── khung tên ────────────────────────────────────────────────────────
     def _fill_meta(self, rec):
