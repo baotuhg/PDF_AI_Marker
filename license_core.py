@@ -28,35 +28,44 @@ _LICENSE_FILE = "pdf_ai.lic"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _get_disk_serial() -> str:
-    """Lấy số Serial phần cứng của ổ đĩa cài Windows (SSD/HDD)."""
+def _get_disk_serials() -> list[str]:
+    """Lấy danh sách Serial của các ổ đĩa cố định nội bộ (bỏ qua USB/thẻ nhớ)."""
     if sys.platform != "win32":
-        return ""
-    # 1. Thử dùng PowerShell CIM (chuẩn hiện đại trên Windows 10 & 11)
+        return []
+    serials = []
     try:
         cmd = [
             "powershell", "-NoProfile", "-Command",
-            "(Get-CimInstance Win32_DiskDrive | Select-Object -First 1).SerialNumber"
+            "(Get-CimInstance Win32_DiskDrive -Filter \"InterfaceType != 'USB'\" | Sort-Object Index).SerialNumber"
         ]
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=4, creationflags=subprocess.CREATE_NO_WINDOW)
-        sn = r.stdout.strip().replace(".", "").replace(" ", "").replace("_", "")
-        if len(sn) >= 6:
-            return sn.upper()
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=5, creationflags=subprocess.CREATE_NO_WINDOW)
+        for line in r.stdout.splitlines():
+            sn = line.strip().replace(".", "").replace(" ", "").replace("_", "")
+            if len(sn) >= 6:
+                clean_sn = sn.upper()
+                if clean_sn not in serials:
+                    serials.append(clean_sn)
     except Exception:
         pass
 
-    # 2. Fallback Win32 Kernel32 Volume Serial (100% không bao giờ lỗi)
-    try:
-        vol_serial = ctypes.c_ulong()
-        ctypes.windll.kernel32.GetVolumeInformationW(
-            "C:\\", None, 0, ctypes.byref(vol_serial), None, None, None, 0
-        )
-        if vol_serial.value:
-            return f"VOL_{vol_serial.value:08X}"
-    except Exception:
-        pass
+    if not serials:
+        try:
+            vol_serial = ctypes.c_ulong()
+            ctypes.windll.kernel32.GetVolumeInformationW(
+                "C:\\", None, 0, ctypes.byref(vol_serial), None, None, None, 0
+            )
+            if vol_serial.value:
+                serials.append(f"VOL_{vol_serial.value:08X}")
+        except Exception:
+            pass
 
-    return ""
+    return serials
+
+
+def _get_disk_serial() -> str:
+    """Lấy số Serial phần cứng của ổ đĩa cài Windows (SSD/HDD chính)."""
+    sns = _get_disk_serials()
+    return sns[0] if sns else ""
 
 
 def _get_pure_hardware_id() -> str:
@@ -103,12 +112,44 @@ def _get_legacy_machine_id() -> str:
 
 
 def _get_candidate_machine_ids() -> list[str]:
-    """Danh sách các mã máy hợp lệ trên máy tính này (Pure HW ID & Legacy ID)."""
-    hw_id = _get_pure_hardware_id()
-    legacy_id = _get_legacy_machine_id()
-    cands = [hw_id]
-    if legacy_id != hw_id and legacy_id not in cands:
-        cands.append(legacy_id)
+    """Danh sách các mã máy hợp lệ trên máy tính này (tất cả các ổ cứng nội bộ, Pure HW ID & Legacy ID)."""
+    cands = []
+    disk_sns = _get_disk_serials()
+    mb = ""
+    if sys.platform == "win32":
+        try:
+            cmd = ["powershell", "-NoProfile", "-Command", "(Get-CimInstance Win32_BaseBoard).SerialNumber"]
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=3, creationflags=subprocess.CREATE_NO_WINDOW)
+            mb_raw = r.stdout.strip()
+            if mb_raw and mb_raw.lower() not in ("to be filled by o.e.m.", "default string", "none"):
+                mb = mb_raw
+        except Exception:
+            pass
+
+    for d_sn in disk_sns:
+        p_hw = []
+        if d_sn:
+            p_hw.append(f"DISK:{d_sn}")
+        if mb:
+            p_hw.append(f"MB:{mb}")
+        if p_hw:
+            hid = hashlib.sha256("|".join(p_hw).encode("utf-8")).hexdigest()[:32].upper()
+            if hid not in cands:
+                cands.append(hid)
+
+        p_leg = list(p_hw)
+        p_leg.append(f"HOST:{platform.node()}")
+        lid = hashlib.sha256("|".join(p_leg).encode("utf-8")).hexdigest()[:32].upper()
+        if lid not in cands:
+            cands.append(lid)
+
+    if not cands:
+        hw_id = _get_pure_hardware_id()
+        legacy_id = _get_legacy_machine_id()
+        cands.append(hw_id)
+        if legacy_id != hw_id and legacy_id not in cands:
+            cands.append(legacy_id)
+
     return cands
 
 

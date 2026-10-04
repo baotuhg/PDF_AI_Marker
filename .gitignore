@@ -20,6 +20,9 @@ pdf_ai.lic
 **/_internal/
 PDF_AI_Marker_v3_Lite/
 KetQua_TuHoc_PhốBảng/
+KetQua_PhốBảng_UltraSharp/
+ultrasharp_rerun.log
+ultrasharp_status.json
 **/*.rar
 **/*.zip
 **/*.7z
