@@ -341,9 +341,15 @@ class InspectorWindow(QMainWindow):
         self.lst_low = QListWidget()
         self.lst_low.currentRowChanged.connect(self._on_low)
         self.lst_low.itemClicked.connect(lambda it: self._on_low(self.lst_low.row(it)))
+        self.lst_low.itemDoubleClicked.connect(lambda it: self._teach_correction(self.lst_low.row(it)))
         ll.addWidget(self.lst_low, 1)
+        self.btn_teach = QPushButton("✏️  Sửa đúng & Dạy máy nhớ")
+        self.btn_teach.setToolTip("Nhập chữ đúng cho mục đang chọn — máy sẽ nhớ và tự sửa cho các hồ sơ sau "
+                                  "(chỉ áp dụng với chữ, không tổng quát hóa con số).")
+        self.btn_teach.clicked.connect(lambda: self._teach_correction(self.lst_low.currentRow()))
+        ll.addWidget(self.btn_teach)
         lh = QLabel("Chữ/số OCR độ tin cậy thấp hoặc hai bộ OCR đọc khác nhau ⟦OCR khác: …⟧. "
-                    "Click để xem tận nơi trên bản vẽ.")
+                    "Click để xem tận nơi trên bản vẽ • Bấm đúp (hoặc nút trên) để sửa đúng và dạy máy.")
         lh.setWordWrap(True)
         lh.setStyleSheet("color: #475569;")
         ll.addWidget(lh)
@@ -732,6 +738,59 @@ class InspectorWindow(QMainWindow):
                                          f"(điểm tin cậy {x.get('score', '?')})")
         else:
             self.show_page(pos)
+
+    def _teach_correction(self, row):
+        """Người dùng nhập chữ đúng cho một mục OCR → dạy máy nhớ (học có giám sát)."""
+        if not (0 <= row < len(getattr(self, "_low_index", []))):
+            QMessageBox.information(self, "Dạy máy sửa lỗi",
+                                    "Hãy chọn một mục trong danh sách '⚠️ Cần đối chiếu' trước.")
+            return
+        pos, x = self._low_index[row]
+        raw = re.sub(r"⟦[^⟧]*⟧", "", str(x.get("text", ""))).strip()
+        new, ok = QInputDialog.getText(self, "Sửa đúng & Dạy máy nhớ",
+                                       f"Chữ OCR (Trang {self.pages[pos]['page']}):\n\nNhập chữ ĐÚNG:",
+                                       QLineEdit.Normal, raw)
+        if not ok:
+            return
+        new = (new or "").strip()
+        if not new or new == raw:
+            return
+        try:
+            from experience_engine import get_experience_engine
+            eng = get_experience_engine()
+            src = Path(str(self.result_dir)).name if getattr(self, "result_dir", None) else ""
+            res = eng.learn_ocr_correction(raw, new, source=src)
+        except Exception as e:
+            QMessageBox.warning(self, "Dạy máy sửa lỗi", f"Không lưu được kinh nghiệm: {e}")
+            return
+
+        # Phản hồi tức thì + lưu nhật ký truy vết trong thư mục kết quả
+        x["text"] = new
+        try:
+            it = self.lst_low.item(row)
+            if it is not None:
+                it.setText(f"Tr.{self.pages[pos]['page']}  •  {new}   ✔ đã sửa")
+                it.setForeground(QColor("#15803d"))
+        except Exception:
+            pass
+        try:
+            folder = getattr(self, "result_dir", None)
+            if folder:
+                from datetime import datetime
+                log = Path(folder) / "sua_loi_ocr.md"
+                head = "" if log.exists() else "# Nhật ký sửa lỗi OCR (người dùng dạy máy)\n\n| Thời gian | Trang | OCR gốc | Sửa đúng |\n|---|---|---|---|\n"
+                with log.open("a", encoding="utf-8") as f:
+                    if head:
+                        f.write(head)
+                    f.write(f"| {datetime.now():%Y-%m-%d %H:%M} | {self.pages[pos]['page']} | {raw} | {new} |\n")
+        except Exception:
+            pass
+
+        if res.get("safe"):
+            self.statusBar().showMessage(f"✅ Đã dạy máy: “{raw}” → “{new}”. Sẽ tự sửa cho các hồ sơ sau.")
+        else:
+            self.statusBar().showMessage(f"✅ Đã lưu sửa “{raw}” → “{new}” (có chữ số: chỉ lưu truy vết, "
+                                         f"KHÔNG tự áp dụng cho hồ sơ khác để tránh sai số liệu).")
 
     # ── khung tên ────────────────────────────────────────────────────────
     def _fill_meta(self, rec):

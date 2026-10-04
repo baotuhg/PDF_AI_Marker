@@ -32,16 +32,21 @@ class AECExperienceEngine:
             self.db_path = Path(db_path)
 
         self.knowledge: Dict[str, Any] = {
-            "version": "1.0",
+            "version": "2.0",
             "last_updated": "",
             "total_documents_read": 0,
-            "learned_phrases": {},      # { "tu_khong_dau": "Từ Có Dấu Chuẩn" }
-            "ocr_corrections": {},      # { "sai_do_ocr": "sửa_đúng" }
+            "learned_phrases": {},      # { "tu_khong_dau": "Từ Có Dấu Chuẩn" } (gốc, nạp 1 lần)
+            "ocr_corrections": {},      # { "sai_do_ocr": "sửa_đúng" } (cần tín hiệu raw↔corrected)
             "unsticking_rules": {},     # { "tudinh": "từ tách" }
             "table_header_aliases": {}, # { "alias": "standard_column" }
-            "abbreviations": {},        # { "KTX": "Ký túc xá", "BASTAF": "Bể xử lý nước thải Bastaf" }
-            "history_log": []           # [ { "doc": ..., "timestamp": ..., "learned_count": ... } ]
+            "abbreviations": {},        # { "BTCT": "Bê tông cốt thép" } — học từ ĐỊNH NGHĨA trong văn bản
+            "term_glossary": {},        # { "cụm từ có dấu": tần suất tích lũy } — vốn từ corpus học được
+            "history_log": []           # [ { "doc": ..., "timestamp": ..., "lessons_learned": ... } ]
         }
+        # Theo dõi phần ĐÃ nạp vào engine sống (idempotent — chống phình bộ nhớ khi đọc batch)
+        self._injected_phrases: set = set()
+        self._injected_unstick: set = set()
+        self._injected_aliases: set = set()
         self.load_db()
 
     def load_db(self):
@@ -66,114 +71,138 @@ class AECExperienceEngine:
             print(f"[ExperienceEngine] Lỗi ghi DB: {e}")
 
     # ─────────────────────────────────────────────────────────────────────────
+    # HÀM PHỤ TRỢ TRÍCH XUẤT TRI THỨC THẬT TỪ NỘI DUNG
+    # ─────────────────────────────────────────────────────────────────────────
+    _STOPWORDS = {
+        "của", "và", "là", "các", "những", "được", "trong", "theo", "với", "cho",
+        "này", "đó", "khi", "đã", "sẽ", "có", "không", "như", "tại", "trên", "dưới",
+        "từ", "đến", "để", "một", "hoặc", "nếu", "thì", "mà", "do", "bởi", "vì",
+        "nên", "cũng", "rất", "thêm", "gồm", "bao", "sau", "trước", "ra", "vào", "tới",
+    }
+
+    @staticmethod
+    def _strip_accents(s: str) -> str:
+        nfd = unicodedata.normalize("NFD", s)
+        out = "".join(c for c in nfd if unicodedata.category(c) != "Mn")
+        return out.replace("đ", "d").replace("Đ", "D")
+
+    @classmethod
+    def _has_diacritic(cls, word: str) -> bool:
+        """True nếu từ có dấu tiếng Việt (để loại chữ OCR không dấu / rác)."""
+        return word.lower() != cls._strip_accents(word).lower()
+
+    @classmethod
+    def _acronym_matches(cls, acro: str, full: str) -> bool:
+        """Kiểm tra ACRO có đúng là chữ cái đầu của cụm từ đầy đủ không (lọc nhiễu)."""
+        words = [w for w in re.split(r"\s+", full.strip()) if w and w[:1].isalpha()]
+        if len(words) < 2:
+            return False
+        a = cls._strip_accents(acro).upper()
+        initials = "".join(cls._strip_accents(w[0]).upper() for w in words)
+        if a == initials:
+            return True
+        # Cho phép bỏ qua các từ nối ngắn (và, của, các, để, cho...)
+        core = [w for w in words if cls._strip_accents(w).lower()
+                not in {"va", "cua", "cac", "de", "cho", "cong"}]
+        initials2 = "".join(cls._strip_accents(w[0]).upper() for w in core)
+        return a == initials2
+
+    @classmethod
+    def _best_expansion(cls, acro: str, full: str):
+        """Chọn CỬA SỔ từ-cuối khớp acronym (vd 'Hệ thống phòng cháy chữa cháy (PCCC)'
+        → 'phòng cháy chữa cháy'), tránh bắt tham lam dư từ đứng trước. None nếu không khớp."""
+        words = [w for w in re.split(r"\s+", full.strip()) if w and w[:1].isalpha()]
+        if not words:
+            return None
+        a = cls._strip_accents(acro).upper()
+        n = len(a)
+        skip = {"va", "cua", "cac", "de", "cho", "cong", "he", "thong"}
+        for k in (n, n + 1, n + 2, n + 3):     # thử vài cửa sổ cuối (bù từ nối)
+            if 2 <= k <= len(words):
+                window = words[-k:]
+                ini = "".join(cls._strip_accents(w[0]).upper() for w in window)
+                core = [w for w in window if cls._strip_accents(w).lower() not in skip]
+                ini_core = "".join(cls._strip_accents(w[0]).upper() for w in core)
+                if a == ini:
+                    return " ".join(window)
+                if a == ini_core and len(core) >= 2:
+                    return " ".join(core)
+        return cls._acronym_matches(acro, full) and full.strip() or None
+
+    def _learn_abbreviations(self, text: str) -> int:
+        """Học từ viết tắt được ĐỊNH NGHĨA ngay trong văn bản (dữ liệu tự gán nhãn)."""
+        pairs = []
+        # Mẫu 1: "Cụm từ đầy đủ (ACRO)"
+        for m in re.finditer(
+            r"([A-Za-zÀ-ỹĐđ][\wÀ-ỹĐđ]*(?:\s+[\wÀ-ỹĐđ]+){1,7})\s*\(\s*([A-ZĐ]{2,8})\s*\)", text):
+            pairs.append((m.group(2), m.group(1)))
+        # Mẫu 2: "ACRO (Cụm từ đầy đủ)"
+        for m in re.finditer(
+            r"\b([A-ZĐ]{2,8})\s*\(\s*([A-Za-zÀ-ỹĐđ][^)\n]{3,60})\)", text):
+            pairs.append((m.group(1), m.group(2)))
+        # Mẫu 3: dòng chú thích "ACRO : Cụm từ" / "ACRO = Cụm từ"
+        for m in re.finditer(
+            r"(?m)^\s*([A-ZĐ]{2,8})\s*[:=]\s*([A-ZÀ-Ỹ][A-Za-zÀ-ỹĐđ ]{3,60})$", text):
+            pairs.append((m.group(1), m.group(2)))
+
+        new = 0
+        for acro, full in pairs:
+            acro = acro.strip().upper()
+            full = re.sub(r"\s+", " ", full).strip(" .:-–—")
+            exp = self._best_expansion(acro, full)
+            if not exp or len(exp.split()) < 2:
+                continue
+            if acro not in self.knowledge["abbreviations"]:
+                self.knowledge["abbreviations"][acro] = exp
+                new += 1
+        return new
+
+    def _learn_terms(self, text: str) -> int:
+        """Học thuật ngữ chuyên ngành: cụm 2–3 từ CÓ DẤU, LẶP LẠI trong hồ sơ."""
+        tokens = [t for t in re.findall(r"[A-Za-zÀ-ỹĐđ]+", text) if len(t) >= 2]
+        counts: Dict[str, int] = {}
+        for n in (2, 3):
+            for i in range(len(tokens) - n + 1):
+                gram = tokens[i:i + n]
+                low = [w.lower() for w in gram]
+                if any(w in self._STOPWORDS for w in low):
+                    continue
+                if sum(1 for w in gram if self._has_diacritic(w)) < (n + 1) // 2:
+                    continue
+                key = " ".join(low)
+                counts[key] = counts.get(key, 0) + 1
+
+        new = 0
+        glossary = self.knowledge["term_glossary"]
+        for key, c in counts.items():
+            if c < 2:                       # chỉ học cụm LẶP LẠI (giảm nhiễu OCR)
+                continue
+            if key not in glossary:
+                glossary[key] = 0
+                new += 1
+            glossary[key] += c
+        return new
+
+    # ─────────────────────────────────────────────────────────────────────────
     # BỘ NÃO SOI CHIẾU & ĐÚC RÚT KINH NGHIỆM TỪ VĂN BẢN
     # ─────────────────────────────────────────────────────────────────────────
     def distill_text_experience(self, text: str, doc_name: str = "") -> Dict[str, int]:
         """
-        Phân tích văn bản của một hồ sơ để tự động đúc rút các thuật ngữ mới,
-        các từ viết tắt, các lỗi OCR và bổ sung vào Ngân hàng kinh nghiệm.
+        Đúc rút tri thức THỰC SỰ MỚI từ NỘI DUNG tài liệu (không phải danh sách cứng):
+          • Từ viết tắt được ĐỊNH NGHĨA ngay trong văn bản — dữ liệu tự gán nhãn, tin cậy cao.
+          • Thuật ngữ chuyên ngành (cụm 2–3 từ có dấu) LẶP LẠI trong hồ sơ — vốn từ corpus.
+
+        LƯU Ý KIẾN TRÚC: trả về 0 khi tài liệu không có gì chưa từng gặp là ĐÚNG. Khác hẳn
+        lỗi cũ (luôn = 0 sau vài hồ sơ đầu): bản cũ chỉ dò 3 DANH SÁCH CỨNG rồi thêm lại chính
+        các mục cứng đó, không hề đọc nội dung — nên cạn kiệt sau ~10–15 hồ sơ và mãi mãi = 0.
         """
-        new_phrases = 0
-        new_unstick = 0
-        new_abbr = 0
-
-        # 1. Phát hiện các cụm từ viết hoa / thuật ngữ kỹ thuật đặc thù
-        # VD: BASTAF, uPVC, HDPE, BTCT, THCS, PTTHNT, KTX, PCCC, TBA, CB400, CB300, M200, M250, M300
-        abbr_patterns = [
-            (r"\bBASTAF\b", "Bể tự hoại xử lý nước thải Bastaf"),
-            (r"\bPTTHNT\b", "Phổ thông Dân tộc Nội trú"),
-            (r"\bTHCS\b", "Trung học Cơ sở"),
-            (r"\bKTX\b", "Ký túc xá"),
-            (r"\bTH\b", "Tiểu học"),
-            (r"\bPCCC\b", "Phòng cháy Chữa cháy"),
-            (r"\bTBA\b", "Trạm Biến áp"),
-            (r"\buPVC\b", "Ống nhựa uPVC"),
-            (r"\bHDPE\b", "Ống nhựa HDPE"),
-            (r"\bXLNT\b", "Xử lý nước thải"),
-            (r"\bHTKT\b", "Hạ tầng kỹ thuật"),
-            (r"\bTMB\b", "Tổng mặt bằng"),
-            (r"\bCTST\b", "Công trình sinh hoạt"),
-            (r"\bBTXM\b", "Bê tông xi măng"),
-            (r"\bBTCT\b", "Bê tông cốt thép"),
-            (r"\bCPĐD\b", "Cấp phối đá dăm"),
-        ]
-        for pat, desc in abbr_patterns:
-            if re.search(pat, text, re.IGNORECASE):
-                key = re.sub(r"\\b", "", pat)
-                if key not in self.knowledge["abbreviations"]:
-                    self.knowledge["abbreviations"][key] = desc
-                    new_abbr += 1
-
-        # 2. Phát hiện các cụm từ chuyên ngành xây dựng trường học, dân dụng & hạ tầng
-        # Khớp các cụm từ tiếng Việt chuẩn có dấu xuất hiện trong tài liệu
-        domain_keywords = [
-            "ký túc xá", "phòng học", "khối tiểu học", "khối thcs", "nhà hiệu bộ",
-            "nhà chức năng", "nhà đa năng", "nhà bếp ăn", "khu học bộ môn",
-            "ký túc xá giáo viên", "bể xử lý nước thải", "bể tự hoại", "nước thải bastaf",
-            "phá dỡ", "nhà lớp học", "cấp nước sinh hoạt", "đầu nguồn",
-            "cấp thoát nước", "hệ thống chiếu sáng", "sân đường nội bộ",
-            "san nền", "sân bóng đá", "tổng mặt bằng", "cổng hàng rào",
-            "kè đá", "cột cờ", "trạm biến áp", "đường dây", "đường giao thông",
-            "chống thấm sika", "màng chống thấm", "xà gồ mạ kẽm", "ngói mũi hài",
-            "tấm lợp lấy sáng", "cửa đi nhôm kính", "cửa sổ lùa", "kính dán an toàn",
-            "lan can inox", "tay vịn gỗ", "sơn epoxy", "gạch ceramic",
-            "bê tông lót", "vữa xi măng mác", "cốt thép dọc", "cốt đai",
-            "đoạn neo cốt thép", "hố ga thu nước", "rãnh thoát nước b100",
-            "tấm đan bê tông", "bó vỉa bê tông", "bậc lên xuống", "gờ chắn bánh",
-            "độ chặt k95", "độ chặt k98", "cát đệm móng", "đá 1x2", "đá 4x6",
-            "đất đắp bao", "đất đắp nền", "đào móng cột", "đào móng băng"
-        ]
-
-        for phrase in domain_keywords:
-            raw_key = unicodedata.normalize("NFD", phrase)
-            raw_key = "".join(c for c in raw_key if unicodedata.category(c) != "Mn").lower()
-            if raw_key not in self.knowledge["learned_phrases"]:
-                self.knowledge["learned_phrases"][raw_key] = phrase
-                new_phrases += 1
-
-        # 3. Đúc rút các từ dính thường gặp trong scan bản vẽ
-        unstick_patterns = [
-            (r"\bkytucxa\b", "ký túc xá"),
-            (r"\bphonghoc\b", "phòng học"),
-            (r"\bnhabepan\b", "nhà bếp ăn"),
-            (r"\bnhahieubo\b", "nhà hiệu bộ"),
-            (r"\bkhuhocbomon\b", "khu học bộ môn"),
-            (r"\bnhadanang\b", "nhà đa năng"),
-            (r"\bbastaf\b", "Bastaf"),
-            (r"\bbetuhoai\b", "bể tự hoại"),
-            (r"\bcapthoatnuoc\b", "cấp thoát nước"),
-            (r"\bsannen\b", "san nền"),
-            (r"\bsanbongda\b", "sân bóng đá"),
-            (r"\btongmatbang\b", "tổng mặt bằng"),
-            (r"\bconghangrao\b", "cổng hàng rào"),
-            (r"\bkeda\b", "kè đá"),
-            (r"\bcotco\b", "cột cờ"),
-            (r"\btrambienap\b", "trạm biến áp"),
-            (r"\bduonggiaothong\b", "đường giao thông"),
-            (r"\bchongtham\b", "chống thấm"),
-            (r"\bxagothep\b", "xà gồ thép"),
-            (r"\bnhomkinh\b", "nhôm kính"),
-            (r"\blancan\b", "lan can"),
-            (r"\bhoanthien\b", "hoàn thiện"),
-            (r"\bphado\b", "phá dỡ"),
-            (r"\bcaitao\b", "cải tạo"),
-            (r"\bxaydung\b", "xây dựng"),
-        ]
-        for pat, repl in unstick_patterns:
-            key = pat.strip(r"\b")
-            if key not in self.knowledge["unsticking_rules"]:
-                self.knowledge["unsticking_rules"][key] = repl
-                new_unstick += 1
-
+        if not text:
+            return {"new_abbr": 0, "new_terms": 0}
         return {
-            "new_phrases": new_phrases,
-            "new_unstick": new_unstick,
-            "new_abbr": new_abbr,
+            "new_abbr": self._learn_abbreviations(text),
+            "new_terms": self._learn_terms(text),
         }
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # BỘ NÃO SOI CHIẾU & ĐÚC RÚT KINH NGHIỆM TỪ BẢNG BIỂU (TABLES)
-    # ─────────────────────────────────────────────────────────────────────────
     def distill_table_experience(self, tables: List[Dict[str, Any]]) -> Dict[str, int]:
         """
         Học các biến thể tiêu đề cột từ các bảng biểu mới bóc tách được.
@@ -217,35 +246,113 @@ class AECExperienceEngine:
     # ─────────────────────────────────────────────────────────────────────────
     def sync_to_live_engines(self):
         """
-        Bơm toàn bộ kinh nghiệm đã tích lũy vào bộ nhớ hoạt động của
-        `vn_diacritics` và `table_agent` để trang bị ngay cho các lượt đọc tiếp theo.
+        Nạp tri thức AN TOÀN vào engine đang chạy — CÓ KIỂM SOÁT:
+          • Idempotent: chỉ nạp phần CHƯA nạp (dùng self._injected_*). Bản cũ append TẤT CẢ
+            learned_phrases vào AEC_COMPOUND_PHRASES MỖI epoch → phình O(n×epoch) và recompile
+            toàn bộ regex mỗi lần (rò rỉ bộ nhớ + chậm dần trong chế độ batch).
+          • KHÔNG tự bơm `term_glossary` (thuật ngữ học-tự-động) vào bộ khôi phục dấu để tránh
+            VÒNG LẶP PHẢN HỒI làm trôi chất lượng. Thuật ngữ mới phục vụ RAG/gợi ý-AI và chờ duyệt.
+          • Tái tạo restorer theo kiểu LAZY (đặt _DEFAULT_RESTORER=None) thay vì dựng lại ngay.
         """
         try:
             import vn_diacritics
-            # 1. Bơm thêm từ ghép mới
+            changed = False
+            # 1. Nạp 1 lần các cụm từ ghép GỐC (learned_phrases nạp sẵn từ DB), không lặp lại
             for raw_k, phr in self.knowledge.get("learned_phrases", {}).items():
+                if raw_k in self._injected_phrases:
+                    continue
                 vn_diacritics.AEC_COMPOUND_PHRASES.append((raw_k, phr))
-
-            # 2. Bơm thêm quy tắc tách từ dính
+                self._injected_phrases.add(raw_k)
+                changed = True
+            # 2. Nạp quy tắc tách từ dính (chỉ phần mới)
             for k, repl in self.knowledge.get("unsticking_rules", {}).items():
-                rule = (r"\b" + re.escape(k) + r"\b", repl)
-                vn_diacritics.AEC_UNSTICKING_RULES.insert(0, rule)
-
-            # Khởi tạo lại singleton restorer
-            vn_diacritics._DEFAULT_RESTORER = vn_diacritics.VietnameseDiacriticRestorer()
+                if k in self._injected_unstick:
+                    continue
+                vn_diacritics.AEC_UNSTICKING_RULES.insert(0, (r"\b" + re.escape(k) + r"\b", repl))
+                self._injected_unstick.add(k)
+                changed = True
+            if changed:
+                vn_diacritics._DEFAULT_RESTORER = None   # dựng lại lười ở lần restore kế tiếp
         except Exception as e:
             print(f"[ExperienceEngine] Lỗi đồng bộ vn_diacritics: {e}")
 
         try:
             import table_agent
             for alias, std_col in self.knowledge.get("table_header_aliases", {}).items():
-                # Bổ sung alias vào các bộ nhận diện của table_agent
+                if alias in self._injected_aliases:
+                    continue
                 if std_col == "mark":
                     table_agent.MARK_ALIASES.add(alias)
                 elif std_col == "quantity":
                     table_agent.QTY_ALIASES.add(alias)
+                self._injected_aliases.add(alias)
         except Exception as e:
             print(f"[ExperienceEngine] Lỗi đồng bộ table_agent: {e}")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # HỌC CÓ GIÁM SÁT: SỬA LỖI OCR TỪ NGƯỜI DÙNG (du_lieu raw ↔ chữ người sửa)
+    # ─────────────────────────────────────────────────────────────────────────
+    @staticmethod
+    def _has_digit(s: str) -> bool:
+        return bool(re.search(r"\d", s or ""))
+
+    def learn_ocr_correction(self, raw: str, corrected: str, source: str = "",
+                             min_len: int = 2) -> Dict[str, Any]:
+        """
+        Học MỘT cặp sửa lỗi OCR do NGƯỜI dùng xác nhận trong màn Đối chiếu (có giám sát).
+
+        An toàn: chỉ cặp CHỮ (không chứa số) mới được đánh dấu `safe` để ÁP DỤNG LẠI tự động
+        cho các hồ sơ sau. Sửa SỐ chỉ được LƯU để truy vết, KHÔNG tổng quát hóa — vì một con số
+        đúng cho ô này có thể sai cho ô/hồ sơ khác.
+        """
+        res = {"stored": False, "safe": False, "reason": ""}
+        raw = re.sub(r"⟦[^⟧]*⟧", "", (raw or "")).strip()   # bỏ ký hiệu ⟦OCR khác: …⟧
+        corrected = (corrected or "").strip()
+        if not raw or not corrected or raw == corrected:
+            res["reason"] = "rỗng hoặc không thay đổi"
+            return res
+        if len(raw) < min_len:
+            res["reason"] = "quá ngắn"
+            return res
+
+        safe = (not self._has_digit(raw) and not self._has_digit(corrected)
+                and len(raw) <= 60 and "\n" not in raw)
+        store = self.knowledge["ocr_corrections"]
+        entry = store.get(raw)
+        if not isinstance(entry, dict):   # mới, hoặc nâng cấp từ schema cũ (chuỗi)
+            entry = {"corrected": corrected, "count": 0, "safe": safe, "source": source}
+            store[raw] = entry
+        else:
+            entry["corrected"] = corrected
+            entry["safe"] = safe
+            entry["source"] = source or entry.get("source", "")
+        entry["count"] = entry.get("count", 0) + 1
+        self.save_db()
+
+        # Nạp nóng vào bộ khôi phục dấu đang chạy (nếu có) để hiệu lực ngay
+        if safe:
+            try:
+                import vn_diacritics
+                if vn_diacritics._DEFAULT_RESTORER is not None:
+                    vn_diacritics._DEFAULT_RESTORER.add_correction(raw, corrected)
+                else:
+                    vn_diacritics._DEFAULT_RESTORER = None
+            except Exception:
+                pass
+
+        res.update(stored=True, safe=safe)
+        return res
+
+    def get_safe_corrections(self, min_count: int = 1) -> Dict[str, str]:
+        """Trả {raw: corrected} cho các cặp sửa lỗi AN TOÀN, đủ tin cậy (áp dụng tự động)."""
+        out: Dict[str, str] = {}
+        for raw, e in (self.knowledge.get("ocr_corrections", {}) or {}).items():
+            if isinstance(e, dict):
+                if e.get("safe") and e.get("count", 0) >= min_count and e.get("corrected"):
+                    out[raw] = e["corrected"]
+            elif not self._has_digit(raw):   # schema cũ dạng chuỗi
+                out[raw] = str(e)
+        return out
 
     def record_epoch(self, doc_name: str, pages_count: int, lessons: Dict[str, Any]):
         """Ghi nhận phiên học tập hoàn thành một hồ sơ."""
@@ -257,10 +364,12 @@ class AECExperienceEngine:
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "lessons_learned": lessons,
             "cumulative_memory": {
-                "phrases": len(self.knowledge["learned_phrases"]),
+                "phrases": len(self.knowledge["term_glossary"]),
                 "unstick_rules": len(self.knowledge["unsticking_rules"]),
                 "abbreviations": len(self.knowledge["abbreviations"]),
-                "table_aliases": len(self.knowledge["table_header_aliases"])
+                "table_aliases": len(self.knowledge["table_header_aliases"]),
+                "terms": len(self.knowledge["term_glossary"]),
+                "ocr_corrections": len(self.knowledge.get("ocr_corrections", {})),
             }
         }
         self.knowledge["history_log"].append(entry)
@@ -276,10 +385,13 @@ class AECExperienceEngine:
             "🎓 BÁO CÁO TIẾN HÓA BỘ NÃO KINH NGHIỆM AEC (EXPERIENCE ENGINE)",
             "==================================================================",
             f"📁 Tổng số hồ sơ đã học: {k['total_documents_read']}",
-            f"📚 Tổng vốn từ chuyên sâu tích lũy: {len(k['learned_phrases'])} thuật ngữ",
+            f"📚 Vốn từ chuyên ngành học từ corpus: {len(k.get('term_glossary', {}))} cụm",
+            f"🏷️  Từ viết tắt TỰ ĐỊNH NGHĨA học được: {len(k['abbreviations'])} từ",
             f"⚡ Quy tắc tách từ dính scan CAD: {len(k['unsticking_rules'])} quy tắc",
-            f"🏷️  Thuật ngữ viết tắt ngành AEC: {len(k['abbreviations'])} từ viết tắt",
             f"📊 Biến thể tiêu đề bảng BoQ/Thép: {len(k['table_header_aliases'])} biến thể",
+            f"✍️  Sửa lỗi OCR người dùng dạy: {len(k.get('ocr_corrections', {}))} cặp "
+            f"({len(self.get_safe_corrections())} áp dụng tự động)",
+            f"📖 Cụm từ ghép nạp sẵn (gốc): {len(k['learned_phrases'])} cụm",
             "------------------------------------------------------------------",
             "LỊCH SỬ HỌC TẬP GẦN ĐÂY:"
         ]
