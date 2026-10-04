@@ -1,0 +1,98 @@
+[
+  {
+    "pattern": "\\bBANQUANLYDUANDAU\\s*TUXAY\\s*DUNG\\b",
+    "replace": "BAN QUẢN LÝ DỰ ÁN ĐẦU TƯ XÂY DỰNG"
+  },
+  {
+    "pattern": "\\bdamTbangcacthanhdinhvivavit\\b",
+    "replace": "dầm T bằng các thanh định vị và vít"
+  },
+  {
+    "pattern": "lanrcay,?\\s*thc\\s*vat",
+    "replace": "lẫn rễ cây, thực vật"
+  },
+  {
+    "pattern": "\\bBanmat\\s+cau\\s+bangbe\\s+tong\\s+cot\\s+thep\\s+do\\s+tai\\s+choco\\s+chieu\\s+daynhonhat\\b",
+    "replace": "Bản mặt cầu bằng bê tông cốt thép đổ tại chỗ có chiều dày nhỏ nhất"
+  },
+  {
+    "pattern": "\\btiepxucvoinendatcanphaiquet\\s+21opnhua\\s+duongnong2kg/m2\\b",
+    "replace": "tiếp xúc với nền đất cần phải quét 2 lớp nhựa đường nóng 2kg/m2"
+  },
+  {
+    "pattern": "\\bM6\\s+cau:M6bang\\s+be\\s+tong\\s+cot\\s+thep\\s+do\\s+tai\\s+cho,kieu\\s+chu\\s+U\\b",
+    "replace": "Mố cầu: Mố bằng bê tông cốt thép đổ tại chỗ, kiểu chữ U"
+  },
+  {
+    "pattern": "\\bquy\\s+chuanky\\s+thuatQuocgia\\b",
+    "replace": "Quy chuẩn kỹ thuật Quốc gia"
+  },
+  {
+    "pattern": "\\bda damdemday10cm\\b",
+    "replace": "đá dăm đệm dày 10cm"
+  },
+  {
+    "pattern": "\\bmongam vao da goc\\b",
+    "replace": "móng ngàm vào đá gốc"
+  },
+  {
+    "pattern": "\\bdap chon loc dam chat\\b",
+    "replace": "đắp chọn lọc đầm chặt"
+  },
+  {
+    "pattern": "\\bchan khay gia co tr non\\b",
+    "replace": "chân khay gia cố tứ nón"
+  },
+  {
+    "pattern": "\\bCot thepcogoCB400-V\\b",
+    "replace": "Cốt thép có gờ CB400-V"
+  },
+  {
+    "pattern": "\\bcacketcaunhu sau\\b",
+    "replace": "các kết cấu như sau"
+  },
+  {
+    "pattern": "\\bTuong chan, op mai ta luy duong dau cau\\b",
+    "replace": "Tường chắn, ốp mái ta luy đường đầu cầu"
+  },
+  {
+    "pattern": "\\bduoc boc vai dia ky thuat\\b",
+    "replace": "được bọc vải địa kỹ thuật"
+  },
+  {
+    "pattern": "\\bDat dap thoat nuoc long mo va duong dau cau\\b",
+    "replace": "Đất đắp thoát nước lòng mố và đường đầu cầu"
+  },
+  {
+    "pattern": "\\bxen kep mach thach anh- canxit\\b",
+    "replace": "xen kẹp mạch thạch anh - canxit"
+  },
+  {
+    "pattern": "\\bphong hoa vra-nhe\\b",
+    "replace": "phong hóa vừa - nhẹ"
+  },
+  {
+    "pattern": "\\bdoi cho phong hoa manh\\b",
+    "replace": "đôi chỗ phong hóa mạnh"
+  },
+  {
+    "pattern": "\\bmau lay (?:duoc|được)\\s*dang thoi ngan\\b",
+    "replace": "mẫu lấy được dạng thỏi ngắn"
+  },
+  {
+    "pattern": "\\bdoi ch v vun thanh dam cuc\\b",
+    "replace": "đôi chỗ vỡ vụn thành dăm cục"
+  },
+  {
+    "pattern": "\\bv vun thanh dam cuc\\b",
+    "replace": "vỡ vụn thành dăm cục"
+  },
+  {
+    "pattern": "\\bkhoan\\s*neo\\s*vao\\s*da\\s*g6c\\b",
+    "replace": "khoan neo vào đá gốc"
+  },
+  {
+    "pattern": "\\bkhoan\\s*neo\\s*vaoda\\s*g6c\\b",
+    "replace": "khoan neo vào đá gốc"
+  }
+]

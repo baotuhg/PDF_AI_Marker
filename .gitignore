@@ -56,3 +56,8 @@ dist/
 **/dist/
 exclude.txt
 *.rar
+
+# Log chẩn đoán sinh lúc chạy (app_log.py) — không commit
+logs/
+**/logs/
+*.log

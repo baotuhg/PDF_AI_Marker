@@ -15,6 +15,13 @@ import re
 import unicodedata
 from typing import List, Tuple, Dict, Optional
 
+try:
+    from app_log import get_logger
+    log = get_logger(__name__)
+except Exception:
+    import logging
+    log = logging.getLogger("pdf_ai.vn_diacritics")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. BỘ GIẢI MÃ TÁCH TỪ DÍNH (WORD UNSTICKING) CHO SCAN CAD / BẢN VẼ MỜ
@@ -815,8 +822,8 @@ class VietnameseDiacriticRestorer:
                             corrected, safe = str(entry), not re.search(r"\d", raw)
                         if safe and corrected:
                             self.add_correction(raw, corrected)
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("Nạp kinh nghiệm từ experience_db cho restorer lỗi (bỏ qua): %s", e)
 
     def add_correction(self, raw: str, corrected: str) -> bool:
         """Thêm một luật sửa lỗi OCR literal (chỉ chấp nhận cặp CHỮ, không chứa số)."""
