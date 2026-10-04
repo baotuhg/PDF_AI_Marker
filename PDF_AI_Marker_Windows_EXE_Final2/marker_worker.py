@@ -239,7 +239,7 @@ def run_fast_text(request, session):
                 ocr_reasons[reason] = ocr_reasons.get(reason, 0) + 1
                 method += f"+ocr_{reason}"
 
-            analysis = analyze_page(boxes, image=image, factor=factor, dpi=dpi)
+            analysis = analyze_page(boxes, image=image, factor=factor, dpi=dpi, page_num=page_num + 1)
             rec = page_record(page_num + 1, method, analysis, geom=_geom(pw, ph, scale, k))
             if reason:
                 rec["warnings"].append(
@@ -315,7 +315,7 @@ def run_rapid_ocr(request, session, vietnamese=False):
             if shx:
                 res = merge_boxes(shx, res)
             try:
-                analysis = analyze_page(res, image=image, factor=factor, dpi=RENDER_DPI)
+                analysis = analyze_page(res, image=image, factor=factor, dpi=RENDER_DPI, page_num=page_num + 1)
             except Exception as e:
                 emit("progress", message=f"[Cảnh báo bố cục P{page_num + 1}]: {type(e).__name__}: {e}")
                 raw = "\n".join(str(r[1]).strip() for r in res if r and str(r[1]).strip())

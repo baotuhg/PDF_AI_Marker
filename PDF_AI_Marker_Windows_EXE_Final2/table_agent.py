@@ -21,6 +21,7 @@ CAT_REBAR = "rebar"
 CAT_BOQ = "boq"
 CAT_SHEET_INDEX = "sheet_index"
 CAT_SPECS = "specs"
+CAT_TITLE_BLOCK = "title_block"
 CAT_GENERAL = "general"
 
 CATEGORY_METADATA = {
@@ -47,6 +48,12 @@ CATEGORY_METADATA = {
         "icon": "📐",
         "sheet_title": "📐 Tọa độ & Thông Số",
         "color": "7030A0",  # Tím trắc địa / kỹ thuật
+    },
+    CAT_TITLE_BLOCK: {
+        "name": "Khung tên Bản vẽ CAD",
+        "icon": "📐",
+        "sheet_title": "Khung tên",
+        "color": "7F7F7F",
     },
     CAT_GENERAL: {
         "name": "Bảng số liệu khác",
@@ -149,6 +156,19 @@ class AECTableClassifier:
         headers = [_strip_accents(str(h)) for h in (table.get("header") or [])]
         header_text = " ".join(headers)
         all_text = title + " " + header_text
+
+        # 0. Bộ lọc Khung tên Bản vẽ CAD (Loại trừ tuyệt đối các bảng khung tên lọt lưới)
+        tb_keywords = [
+            "CHU DAU TU", "CO QUAN THIET KE", "DON VI THIET KE", "TEN BAN VE",
+            "GIAI DOAN THIET KE", "CHUNHIEM THIET KE", "CHU NHIEM", "THE HIEN",
+            "QUAN LY KY THUAT", "BAN VE SO", "SO HIEU BAN VE", "GIAM DOC",
+            "LAN XUAT BAN", "CAN BO THIET KE", "NGUOI VE"
+        ]
+        sample_rows_text = " ".join(_strip_accents(str(c)) for r in (table.get("rows") or [])[:5] for c in r)
+        all_table_text = title + " " + header_text + " " + sample_rows_text
+        tb_hits = sum(1 for kw in tb_keywords if kw in all_table_text)
+        if tb_hits >= 2:
+            return CAT_TITLE_BLOCK, CATEGORY_METADATA[CAT_TITLE_BLOCK]["name"], 0.99
 
         # 1. Điểm số Thống kê Cốt thép
         rebar_score = 0
@@ -391,18 +411,32 @@ def export_aec_excel(tables: List[Dict[str, Any]], excel_path: Path):
     align_left = Alignment(horizontal="left", vertical="center", wrap_text=True)
     align_right = Alignment(horizontal="right", vertical="center")
 
-    # 1. Phân loại và thẩm tra toàn bộ bảng
+    # 1. Phân loại và thẩm tra toàn bộ bảng (loại bỏ triệt để bảng khung tên CAD)
     categorized: Dict[str, List[Dict[str, Any]]] = {
         CAT_REBAR: [], CAT_BOQ: [], CAT_SHEET_INDEX: [], CAT_SPECS: [], CAT_GENERAL: []
     }
-    for idx, tbl in enumerate(tables, 1):
+    valid_tables = []
+    tbl_counter = 1
+    for tbl in tables:
         cat, cat_name, conf = AECTableClassifier.classify(tbl)
+        if cat == CAT_TITLE_BLOCK:
+            continue
         audit_res = AECTableAuditor.audit(tbl, cat)
-        tbl["_id"] = idx
+        tbl["_id"] = tbl_counter
+        tbl_counter += 1
         tbl["_cat"] = cat
         tbl["_cat_name"] = cat_name
         tbl["_audit"] = audit_res
         categorized[cat].append(tbl)
+        valid_tables.append(tbl)
+    tables = valid_tables
+
+    if not tables:
+        ws = wb.create_sheet(title="Thông báo")
+        ws.cell(row=1, column=1, value="Không tìm thấy bảng số liệu kẻ ô trong tài liệu này.")
+        wb.remove(default_sheet)
+        wb.save(str(excel_path))
+        return
 
     # 2. TẠO SHEET 1: MỤC LỤC BẢNG BIỂU (HYPERLINK NAVIGATION)
     ws_index = wb.create_sheet(title="📑 Mục Lục Bảng Biểu")

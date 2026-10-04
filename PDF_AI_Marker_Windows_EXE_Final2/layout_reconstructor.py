@@ -439,7 +439,7 @@ def make_table(rows: List[List[str]], title: str, bbox: Optional[List[float]], s
     first = {c for c in rows[0] if c}      # ô gộp cả hàng -> mọi ô cùng một chữ
     if len(first) == 1 and len(rows[0]) >= 3 and has_kw(next(iter(first)), ["BANG", "THONGKE", "KHOILUONG"]):
         head = next(iter(first))
-        title = f"{title} — {head}" if title and not title.startswith("Bảng (") else head
+        title = head
         rows = rows[1:]
         if len(rows) < 2:
             return None
@@ -713,20 +713,160 @@ def scattered_segments(items: List[Dict[str, Any]], gap_factor: float = 3.0) -> 
 # ─────────────────────────────────────────────────────────────────────────────
 # Khung tên, dấu thẩm định, siêu dữ liệu bản vẽ
 # ─────────────────────────────────────────────────────────────────────────────
-TITLE_BLOCK_KW = ["HOSOTHIETKE", "CHUCDANH", "HOVATEN", "CHUKY", "TYLEBANVE", "BANVESO", "BANVES6", "BANVES0",
-                  "LANXUATBAN", "CNTK", "CHUNHIEM", "KIEMTRA", "GIAMDOC", "CHUDAUTU",
-                  "TUVANTHIETKE", "DONVITUVAN", "GOITHAU", "CONGTRINH", "HANGMUC", "SOAT",
-                  "CTTHIETKE", "THIETKE", "BANVETHICONG", "KYHIEUBANVE"]
-TITLE_BLOCK_STRONG_KW = {"CHUCDANH", "HOVATEN", "CHUKY", "TYLEBANVE", "BANVESO", "BANVES6", "BANVES0", "LANXUATBAN",
-                         "CNTK", "KYHIEUBANVE"}
+TITLE_BLOCK_KW = [
+    "HOSOTHIETKE", "CHUCDANH", "HOVATEN", "CHUKY", "TYLEBANVE", "BANVESO", "BANVES6", "BANVES0",
+    "LANXUATBAN", "CNTK", "CHUNHIEM", "CHUNHIEMTHIETKE", "KIEMTRA", "GIAMDOC", "CHUDAUTU",
+    "TUVANTHIETKE", "DONVITUVAN", "COQUANTHIETKE", "DONVITHIETKE", "GOITHAU", "CONGTRINH",
+    "TENCONGTRINH", "HANGMUC", "SOAT", "CTTHIETKE", "THIETKE", "BANVETHICONG", "KYHIEUBANVE",
+    "TENBANVE", "GIAIDOANTHIETKE", "THEHIEN", "THIETKEBANVE", "QUANLYKYTHUAT", "THOIGIANHOANTHANH",
+    "NGAYHOANTHANH", "CANBOTHIETKE", "NGUOIVE", "NGUOIKIEM", "TRUONGPHONG", "BANVE"
+]
+TITLE_BLOCK_STRONG_KW = {
+    "CHUCDANH", "HOVATEN", "CHUKY", "TYLEBANVE", "BANVESO", "BANVES6", "BANVES0", "LANXUATBAN",
+    "CNTK", "KYHIEUBANVE", "TENBANVE", "CHUNHIEM", "CHUNHIEMTHIETKE", "GIAIDOANTHIETKE",
+    "THEHIEN", "COQUANTHIETKE", "DONVITHIETKE", "CHUDAUTU", "GIAMDOC", "QUANLYKYTHUAT",
+    "TUVANTHIETKE"
+}
 STAMP_KW = ["THAMDINH", "PHEDUYET", "SOGIAOTHONG", "GIAOTHONGVANTAI", "VANTAI", "THEOVANBAN",
             "QLCLCT", "KYTEN"]
 
+COVER_PAGE_KW = [
+    "HOSOTHIETKE", "THIETKEBANVETHICONG", "BANVETHICONG", "BAOCAOKINHTEKYTHUAT",
+    "BAOCAONGHIENCUUKHATHTHI", "HOSOMOITHAU", "HOSOYEUCAU", "THIETKEKITHUAT",
+    "THIETKEKYTHUATTHICONG", "HOSOTHICONG", "BANVETHOICONG"
+]
+COVER_AVOID_KW = [
+    "MATDUNG", "MATBANG", "MATCAT", "THONGKECOTTHEP", "TRACDOC", "TRACNGANG", "CHITIET"
+]
+
+
+def is_cover_page(items: List[Dict[str, Any]], page_num: int = 1) -> bool:
+    """Nhận diện Tờ bìa / Trang bìa hồ sơ thiết kế công trình xây dựng Việt Nam.
+    Chỉ áp dụng cho trang đầu tiên (page_num == 1) hoặc trang 2 nếu không có khung tên CAD."""
+    if page_num > 2:
+        return False
+    # Nếu trang chứa các nhãn khung tên bản vẽ kỹ thuật CAD thì chắc chắn KHÔNG phải bìa
+    all_key = fold_key(" ".join(it["text"] for it in items))
+    tb_drawing_kw = ["TENBANVE", "GIAIDOANTHIETKE", "CHUNHIEMTHIETKE", "QUANLYKYTHUAT",
+                     "THEHIEN", "NGUOIVE", "TYLEBANVE", "BANVESO"]
+    if sum(1 for kw in tb_drawing_kw if kw in all_key) >= 2:
+        return False
+
+    # Bìa thường có số lượng item ít (< 65 items)
+    if len(items) > 65:
+        return False
+
+    has_cover_kw = any(kw in all_key for kw in COVER_PAGE_KW)
+    if not has_cover_kw:
+        if page_num == 1 and ("CONGTRINH" in all_key or "DUAN" in all_key) and ("CHUDAUTU" in all_key or "TUVAN" in all_key or "THIETKE" in all_key):
+            has_cover_kw = True
+    if not has_cover_kw:
+        return False
+    avoid_hits = sum(1 for kw in COVER_AVOID_KW if kw in all_key)
+    return avoid_hits == 0
+
+
+def extract_cover_metadata(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Trích xuất thông tin tổng thể của dự án/công trình từ tờ bìa."""
+    meta: Dict[str, Any] = {}
+    lines = [l["items"] for l in cluster_items_into_lines(items)]
+    full_lines = [" ".join(it["text"] for it in line).strip() for line in lines if line]
+    joined_text = "\n".join(full_lines)
+
+    for i, line in enumerate(full_lines):
+        line_k = fold_key(line)
+        # 1. Công trình
+        if any(k in line_k for k in ["CONGTRINH", "DUAN", "TENCONGTRINH"]) and "cong_trinh" not in meta:
+            v = _search(r"(?:CONG\s*TRINH|DU\s*AN|TEN\s*CONG\s*TRINH)\s*[:.]?\s*(.+)$", line)
+            if v and len(v) > 3 and not any(bad in fold_key(v) for bad in ["THEOVANBAN", "SO", "NGAY"]):
+                meta["cong_trinh"] = v
+            elif i + 1 < len(full_lines):
+                nxt = full_lines[i + 1]
+                if not any(k in fold_key(nxt) for k in ["HANGMUC", "CHUDAUTU", "THEOVANBAN"]):
+                    meta["cong_trinh"] = nxt
+
+        # 2. Hạng mục
+        if "HANGMUC" in line_k and "hang_muc" not in meta:
+            v = _search(r"HANG\s*MUC\s*[:.]?\s*(.+)$", line)
+            if v and len(v) > 2:
+                meta["hang_muc"] = v
+            elif i + 1 < len(full_lines):
+                meta["hang_muc"] = full_lines[i + 1]
+
+        # 3. Chủ đầu tư
+        if "CHUDAUTU" in line_k and "chu_dau_tu" not in meta:
+            v = _search(r"CHU\s*DAU\s*TU\s*[:.]?\s*(.+)$", line)
+            if v and len(v) > 2:
+                meta["chu_dau_tu"] = v
+            elif i + 1 < len(full_lines):
+                meta["chu_dau_tu"] = full_lines[i + 1]
+
+        # 4. Tư vấn thiết kế
+        if any(k in line_k for k in ["COQUANTHIETKE", "DONVITHIETKE", "TUVANTHIETKE", "TUVANXAYDUNG", "XAYDUNGVATHIETKE"]) and "don_vi_thiet_ke" not in meta:
+            meta["don_vi_thiet_ke"] = line
+
+        # 5. Địa điểm
+        if any(k in line_k for k in ["DIADIEM", "DIACHI"]) and "dia_diem" not in meta:
+            v = _search(r"(?:DIA\s*DIEM|DIA\s*CHI)\s*[:.]?\s*(.+)$", line)
+            if v and len(v) > 2:
+                meta["dia_diem"] = v
+            elif i + 1 < len(full_lines):
+                meta["dia_diem"] = full_lines[i + 1]
+
+    m_nam = re.search(r"\b(202\d|19\d\d)\b", joined_text)
+    if m_nam and "nam" not in meta:
+        meta["nam"] = m_nam.group(1)
+
+    for gd in ["THIẾT KẾ BẢN VẼ THI CÔNG", "THIẾT KẾ KỸ THUẬT THI CÔNG", "THIẾT KẾ CƠ SỞ", "BÁO CÁO KINH TẾ KỸ THUẬT"]:
+        if fold_key(gd) in fold_key(joined_text):
+            meta["giai_doan"] = gd
+            break
+
+    return meta
+
+
+def render_cover_page(items: List[Dict[str, Any]], meta: Dict[str, Any]) -> str:
+    """Kết xuất trang bìa thành Markdown trang trọng, gọn gàng, loại bỏ hoàn toàn bảng rác."""
+    sections = []
+    giai_doan = meta.get("giai_doan", "HỒ SƠ THIẾT KẾ BẢN VẼ THI CÔNG")
+    sections.append(f"# 📑 {giai_doan.upper()}")
+
+    details = []
+    if meta.get("cong_trinh"):
+        details.append(f"- **Công trình / Dự án:** {meta['cong_trinh']}")
+    if meta.get("hang_muc"):
+        details.append(f"- **Hạng mục:** {meta['hang_muc']}")
+    if meta.get("chu_dau_tu"):
+        details.append(f"- **Chủ đầu tư:** {meta['chu_dau_tu']}")
+    if meta.get("don_vi_thiet_ke"):
+        details.append(f"- **Đơn vị tư vấn thiết kế:** {meta['don_vi_thiet_ke']}")
+    if meta.get("dia_diem"):
+        details.append(f"- **Địa điểm xây dựng:** {meta['dia_diem']}")
+    if meta.get("nam"):
+        details.append(f"- **Thời gian / Năm thực hiện:** {meta['nam']}")
+
+    if details:
+        sections.append("\n".join(details))
+
+    other_lines = []
+    for l in cluster_items_into_lines(items):
+        txt = " ".join(it["text"] for it in l["items"]).strip()
+        if not txt or any(txt == meta.get(k) for k in meta):
+            continue
+        if len(txt) > 3 and txt not in other_lines:
+            other_lines.append(txt)
+
+    if other_lines:
+        sections.append("> **Thông tin khác trên trang bìa:**\n" + "\n".join(f"> - {t}" for t in other_lines[:15]))
+
+    return "\n\n".join(sections)
+
 
 def find_title_block(items, grids, min_x, min_y, page_w, page_h):
-    """Khung tên: vùng chứa >= 3 từ khóa khung tên, nằm ở đáy hoặc mép phải trang."""
+    """Khung tên: vùng chứa >= 2 từ khóa khung tên, nằm ở đáy hoặc mép phải trang.
+    Trả về (tb_items, tb_grids): danh sách chữ khung tên và TẤT CẢ các lưới kẻ ô thuộc khung tên."""
     zone = [it for it in items
-            if it["cy"] >= min_y + 0.70 * page_h or it["cx"] >= min_x + 0.78 * page_w]
+            if it["cy"] >= min_y + 0.65 * page_h or it["cx"] >= min_x + 0.72 * page_w]
     anchors, hits = [], set()
     for it in zone:
         key = fold_key(it["text"])
@@ -734,23 +874,37 @@ def find_title_block(items, grids, min_x, min_y, page_w, page_h):
         if found:
             anchors.append(it)
             hits.update(found)
-    # Cần >= 3 từ khóa khác nhau, trong đó ít nhất 1 từ khóa chỉ có ở khung tên
-    # (tránh nhận nhầm đoạn thuyết minh có chữ 'công trình', 'gói thầu').
-    if len(hits) < 3 or not hits & TITLE_BLOCK_STRONG_KW:
-        return [], None
+
+    strong_hits = hits & TITLE_BLOCK_STRONG_KW
+    if len(hits) < 2 or not strong_hits:
+        return [], []
+
+    matched_grids = []
     for g in grids:
         x0, y0, x1, y1 = g["bbox"]
         inside = [a for a in anchors if x0 <= a["cx"] <= x1 and y0 <= a["cy"] <= y1]
-        if len(inside) >= 2:
-            region, grid = (x0 - 3, y0 - 3, x1 + 3, y1 + 3), g
-            break
+        if len(inside) >= 1 or (x0 >= min_x + 0.68 * page_w and y0 >= min_y + 0.60 * page_h):
+            matched_grids.append(g)
+
+    if matched_grids:
+        gx0 = min(g["bbox"][0] for g in matched_grids) - 5
+        gy0 = min(g["bbox"][1] for g in matched_grids) - 5
+        gx1 = max(g["bbox"][2] for g in matched_grids) + 5
+        gy1 = max(g["bbox"][3] for g in matched_grids) + 5
+        all_x0 = [gx0] + [a["x_min"] for a in anchors]
+        all_y0 = [gy0] + [a["y_min"] for a in anchors]
+        all_x1 = [gx1] + [a["x_max"] for a in anchors]
+        all_y1 = [gy1] + [a["y_max"] for a in anchors]
+        region = (min(all_x0) - 5, min(all_y0) - 5, max(all_x1) + 5, max(all_y1) + 5)
     else:
         pad = 2 * _median_h(anchors)
         region = (min(a["x_min"] for a in anchors) - pad, min(a["y_min"] for a in anchors) - pad,
                   max(a["x_max"] for a in anchors) + pad, max(a["y_max"] for a in anchors) + pad)
-        grid = None
-    tb = [it for it in items if region[0] <= it["cx"] <= region[2] and region[1] <= it["cy"] <= region[3]]
-    return tb, grid
+
+    tb_grids = [g for g in grids if not (g["bbox"][2] < region[0] or g["bbox"][0] > region[2]
+                                         or g["bbox"][3] < region[1] or g["bbox"][1] > region[3])]
+    tb_items = [it for it in items if region[0] <= it["cx"] <= region[2] and region[1] <= it["cy"] <= region[3]]
+    return tb_items, tb_grids
 
 
 def find_stamp(items, excluded_ids, page_w, page_h):
@@ -796,36 +950,97 @@ def _search(pattern: str, text: str, group: int = 1) -> Optional[str]:
 
 def extract_sheet_metadata(tb_items: List[Dict[str, Any]], all_items: List[Dict[str, Any]]) -> Dict[str, Any]:
     meta: Dict[str, Any] = {}
-    # Cắt theo ô của khung tên (khoảng trống ngang lớn) để trường không dính ô bên cạnh
-    lines = scattered_segments(tb_items, gap_factor=1.5)
-    joined = " | ".join(lines)
-    if tb_items:
-        v = _search(r"BAN\s*VE\s*S[O06]\s*[:.]?\s*([A-Z]{1,6}\s*[-.]\s*\d+[A-Z0-9.\-/]*|\d+[A-Z0-9.\-/]*)", joined)
-        if v:
-            meta["so_hieu_ban_ve"] = re.sub(r"\s+", "", v)
-        v = _search(r"TY\s*L[E3]\s*(?:BAN\s*VE)?\s*[:.]?\s*(1\s*[/:]\s*\d+)", joined)
-        if v:
-            meta["ty_le"] = re.sub(r"\s+", "", v)
-        v = _search(r"LAN\s*XUAT\s*BAN\s*[:.]?\s*(\d+)", joined)
-        if v:
-            meta["lan_xuat_ban"] = v
-        m = re.search(r"NGAY\W{0,8}(\d{1,2})\W{0,8}THANG\W{0,8}(\d{1,2})\W{0,8}NAM\W{0,4}(\d{4})", fold_upper(joined))
+    if not tb_items:
+        return meta
+
+    tb_lines = cluster_items_into_lines(tb_items)
+    lines_txt = [" ".join(it["text"] for it in l["items"]).strip() for l in tb_lines if l["items"]]
+    joined = " | ".join(lines_txt)
+
+    # 1. Trích xuất regex cho số hiệu, tỷ lệ, ngày tháng, giai đoạn
+    v = _search(r"(?:BAN\s*VE\s*S[O06]|KY\s*HIEU\s*BAN\s*VE|SO\s*HIEU)\s*[:.]?\s*([A-Z]{1,6}\s*[-.]\s*\d+[A-Z0-9.\-/]*|\d+[A-Z0-9.\-/]*)", joined)
+    if v:
+        meta["so_hieu_ban_ve"] = re.sub(r"\s+", "", v)
+    else:
+        m_code = re.search(r"\b(KT[\s.\-_]*\d+[A-Z0-9.\-/]*|KC[\s.\-_]*\d+[A-Z0-9.\-/]*|XLNT[\s.\-_]*\d+[A-Z0-9.\-/]*|KT[.]{1,3})\b", joined, re.I)
+        if m_code:
+            meta["so_hieu_ban_ve"] = re.sub(r"\s+", "", m_code.group(1))
+
+    if "so_hieu_ban_ve" in meta:
+        s = meta["so_hieu_ban_ve"]
+        s = re.sub(r"[.\-_]+", "-", s).strip("-")
+        s = re.sub(r"\b([A-Z]{2,4})-(\d)\b", r"\1-0\2", s)
+        meta["so_hieu_ban_ve"] = s
+
+    v = _search(r"TY\s*L[E3]\s*(?:BAN\s*VE)?\s*[:.]?\s*(1\s*[/:]\s*\d+|KTL|KT)", joined)
+    if v:
+        meta["ty_le"] = re.sub(r"\s+", "", v)
+
+    v = _search(r"LAN\s*XUAT\s*BAN\s*[:.]?\s*(\d+)", joined)
+    if v:
+        meta["lan_xuat_ban"] = v
+
+    m = re.search(r"NGAY\W{0,8}(\d{1,2})\W{0,8}THANG\W{0,8}(\d{1,2})\W{0,8}NAM\W{0,4}(\d{4})", fold_upper(joined))
+    if m:
+        meta["ngay"] = f"{int(m.group(1)):02d}/{int(m.group(2)):02d}/{m.group(3)}"
+    else:
+        m = re.search(r"(?:THOI\s*GIAN|NAM)\W{0,4}((?:19|20)\d\d)", fold_upper(joined))
         if m:
-            meta["ngay"] = f"{int(m.group(1)):02d}/{int(m.group(2)):02d}/{m.group(3)}"
-        else:
-            m = re.search(r"NAM\W{0,4}((?:19|20)\d\d)", fold_upper(joined))
-            if m:
-                meta["nam"] = m.group(1)
-        for line in lines:
-            v = _search(r"CONG\s*TRINH\s*:\s*(.+)$", line)
-            if v and "cong_trinh" not in meta:
-                meta["cong_trinh"] = v
-            v = _search(r"(GOI\s*THAU\s*(?:SO)?\s*[:.]?\s*\d+.*)$", line)
-            if v and "goi_thau" not in meta:
-                meta["goi_thau"] = v
-        title = _sheet_title(tb_items)
-        if title:
-            meta["ten_ban_ve"] = title
+            meta["nam"] = m.group(1)
+
+    m_gd = re.search(r"GIAI\s*DOAN[^\w]*(TK[A-Z0-9.\-/]+|T\.K\.[A-Z0-9.\-/]+|BVTC|THIET\s*KE[^\n|]+)", joined, re.I)
+    if m_gd:
+        meta["giai_doan"] = m_gd.group(1).strip()
+
+    # 2. Quét tuần tự theo các mục nhãn của khung tên CAD Việt Nam
+    SECTION_RULES = [
+        ("COQUANTHIETKE", "don_vi_thiet_ke"),
+        ("DONVITHIETKE", "don_vi_thiet_ke"),
+        ("TUVANTHIETKE", "don_vi_thiet_ke"),
+        ("TENCONGTRINH", "cong_trinh"),
+        ("CONGTRINH", "cong_trinh"),
+        ("CHUNHIEMTHIETKE", "chu_nhiem"),
+        ("CHUNHIEM", "chu_nhiem"),
+        ("QUANLYKYTHUAT", "quan_ly_ky_thuat"),
+        ("TENBANVE", "ten_ban_ve"),
+        ("THEHIEN", "the_hien"),
+        ("NGUOIVE", "the_hien"),
+        ("CHUDAUTU", "chu_dau_tu"),
+        ("HANGMUC", "hang_muc"),
+        ("DIADIEM", "dia_chi"),
+        ("DIACHI", "dia_chi"),
+    ]
+
+    for i, line in enumerate(lines_txt):
+        k = fold_key(line)
+        if any(bad in k for bad in ["GIAMDOC", "TNHH", "TRANG", "GHICHU"]):
+            continue
+
+        matched_field = None
+        for sk, field in SECTION_RULES:
+            if sk in k and field not in meta:
+                val_inline = _search(rf"{sk}\s*[:.]?\s*(.+)$", line)
+                if val_inline and len(val_inline) > 2:
+                    meta[field] = val_inline
+                else:
+                    matched_field = field
+                break
+
+        if matched_field and matched_field not in meta:
+            val_parts = []
+            for j in range(i + 1, min(i + 4, len(lines_txt))):
+                nxt = lines_txt[j].strip()
+                nxt_k = fold_key(nxt)
+                if any(sk in nxt_k for sk, _ in SECTION_RULES) or any(bad in nxt_k for bad in ["GIAIDOAN", "THOIGIAN", "GIAMDOC", "TNHH"]):
+                    break
+                val_parts.append(nxt)
+            if val_parts:
+                meta[matched_field] = " ".join(val_parts)
+
+    title = _sheet_title(tb_items)
+    if title and "ten_ban_ve" not in meta:
+        meta["ten_ban_ve"] = title
+
     ly_trinh = []
     for it in all_items:
         for m in re.finditer(r"KM\s*\d+\s*\+\s*\d+(?:[.,]\d+)?", fold_upper(it["text"])):
@@ -839,7 +1054,7 @@ def extract_sheet_metadata(tb_items: List[Dict[str, Any]], all_items: List[Dict[
 
 def _sheet_title(tb_items: List[Dict[str, Any]]) -> Optional[str]:
     """Tên bản vẽ: dòng chữ ngay phía trên ô 'Tỷ lệ bản vẽ', cùng cột."""
-    anchors = [it for it in tb_items if has_kw(it["text"], ["TYLEBANVE", "BANVESO"])]
+    anchors = [it for it in tb_items if has_kw(it["text"], ["TYLEBANVE", "BANVESO", "TENBANVE"])]
     if not anchors:
         return None
     anchor = min(anchors, key=lambda it: it["x_min"])
@@ -850,7 +1065,6 @@ def _sheet_title(tb_items: List[Dict[str, Any]]) -> Optional[str]:
              and not has_kw(it["text"], ["CONGTY", "CTY", "GIAMDOC", "NGAY", "THANG"])]
     if not cands:
         return None
-    # Lấy dòng gần nhất và các dòng liền kề phía trên (tên bản vẽ có thể 2–3 dòng)
     lines = cluster_items_into_lines(cands)
     picked = [lines[-1]]
     for l in reversed(lines[:-1]):
@@ -860,18 +1074,37 @@ def _sheet_title(tb_items: List[Dict[str, Any]]) -> Optional[str]:
     return " ".join(" ".join(it["text"] for it in l["items"]) for l in picked).strip() or None
 
 
+def render_title_block_banner(meta: Dict[str, Any]) -> str:
+    """Tạo banner bản vẽ kỹ thuật gọn gàng, súc tích thay vì in hàng chục gạch đầu dòng lặp đi lặp lại."""
+    so_hieu = meta.get("so_hieu_ban_ve", "—")
+    ten_bv = meta.get("ten_ban_ve", "Bản vẽ chi tiết")
+    ty_le = meta.get("ty_le", "KT")
+    giai_doan = meta.get("giai_doan", "")
+
+    header_line = f"> 📐 **Bản vẽ:** `{so_hieu}` — **{ten_bv.upper()}** | **Tỷ lệ:** {ty_le}"
+    if giai_doan:
+        header_line += f" | **Giai đoạn:** {giai_doan}"
+
+    parts = [header_line]
+    sub_info = []
+    if meta.get("cong_trinh"):
+        sub_info.append(f"**Công trình:** {meta['cong_trinh']}")
+    if meta.get("chu_dau_tu"):
+        sub_info.append(f"**Chủ đầu tư:** {meta['chu_dau_tu']}")
+    if meta.get("don_vi_thiet_ke"):
+        sub_info.append(f"**Đơn vị thiết kế:** {meta['don_vi_thiet_ke']}")
+    if meta.get("chu_nhiem"):
+        sub_info.append(f"**Chủ nhiệm:** {meta['chu_nhiem']}")
+
+    if sub_info:
+        parts.append("> " + " · ".join(sub_info))
+
+    return "\n".join(parts)
+
+
 def render_title_block(tb_items, meta) -> str:
-    labels = [("ten_ban_ve", "Tên bản vẽ"), ("so_hieu_ban_ve", "Số hiệu bản vẽ"), ("ty_le", "Tỷ lệ"),
-              ("lan_xuat_ban", "Lần xuất bản"), ("ngay", "Ngày"), ("nam", "Năm"),
-              ("cong_trinh", "Công trình"), ("goi_thau", "Gói thầu")]
-    parts = ["### KHUNG TÊN BẢN VẼ"]
-    fields = [f"- **{name}:** {meta[k]}" for k, name in labels if meta.get(k)]
-    if fields:
-        parts.append("\n".join(fields))
-    raw = "\n".join(f"- {seg}" for seg in scattered_segments(tb_items, gap_factor=1.5))
-    if raw:
-        parts.append("Nội dung khung tên (nguyên văn):\n" + raw)
-    return "\n\n".join(parts)
+    """Tương thích ngược: trả về banner bản vẽ gọn gàng."""
+    return render_title_block_banner(meta)
 
 
 def render_stamp(stamp_items) -> str:
@@ -974,6 +1207,8 @@ def _grid_title(grid, items, excluded, med_h) -> Tuple[str, List[Dict[str, Any]]
     cands = [it for it in items if id(it) not in excluded
              and y0 - 5 * med_h <= it["y_max"] <= y0 + med_h * 0.5
              and x0 - 0.1 * span <= it["cx"] <= x1 + 0.1 * span]
+    cands = [it for it in cands if not any(kw in fold_key(it["text"])
+             for kw in ["KYTEN", "CHUKY", "CHUTRI", "BOMON", "THAMTRA", "THAMDINH", "PHEDUYET", "GIAMDOC", "CHUDAUTU"])]
     if not cands:
         return "", []
     lines = cluster_items_into_lines(cands)[-2:]
@@ -1053,11 +1288,12 @@ def is_suspicious_for_review(it: Dict[str, Any], stamp_ids: set, tb_ids: set) ->
     return True
 
 
-def analyze_page(ocr_res: List[Any], image=None, factor: float = 1.0, dpi: float = 200.0) -> Dict[str, Any]:
+def analyze_page(ocr_res: List[Any], image=None, factor: float = 1.0, dpi: float = 200.0, page_num: int = 1) -> Dict[str, Any]:
     """
     Phân tích một trang từ danh sách hộp chữ [[box, text, score], ...].
     image/factor/dpi: ảnh trang (tùy chọn) để dò bảng kẻ ô; factor quy đổi pixel
     ảnh -> hệ tọa độ của box.
+    page_num: số thứ tự trang (1-indexed) để nhận biết trang bìa.
 
     Trả về {markdown, tables, metadata, low_confidence, layout}.
     """
@@ -1080,6 +1316,19 @@ def analyze_page(ocr_res: List[Any], image=None, factor: float = 1.0, dpi: float
     if not items:
         return empty
 
+    # 0. Kiểm tra Tờ bìa / Trang bìa hồ sơ công trình
+    if is_cover_page(items, page_num=page_num):
+        meta = extract_cover_metadata(items)
+        markdown = render_cover_page(items, meta)
+        low = [it for it in items if it.get("score", 1.0) < 0.50]
+        return {
+            "markdown": markdown.strip(),
+            "tables": [],
+            "metadata": meta,
+            "low_confidence": low,
+            "layout": "cover_page"
+        }
+
     min_x = min(it["x_min"] for it in items); max_x = max(it["x_max"] for it in items)
     min_y = min(it["y_min"] for it in items); max_y = max(it["y_max"] for it in items)
     page_w, page_h = max(1.0, max_x - min_x), max(1.0, max_y - min_y)
@@ -1094,14 +1343,16 @@ def analyze_page(ocr_res: List[Any], image=None, factor: float = 1.0, dpi: float
         items = split_items_on_columns(items, grids)
 
     ctx: Dict[str, Any] = {"tables": []}
-    tb_items, tb_grid = find_title_block(items, grids, min_x, min_y, page_w, page_h)
+    tb_items, tb_grids = find_title_block(items, grids, min_x, min_y, page_w, page_h)
     excluded = set(id(it) for it in tb_items)
-    # Chữ nằm trong lưới bảng kẻ ô không thuộc dấu thẩm định (trừ khi chính lưới
-    # đó là khung con dấu). Không có bước này, dấu đóng sát đáy bảng sẽ "mọc"
-    # lên và nuốt các dòng cuối bảng (vd. D16/D22-CB400-V ở PD-07).
+    tb_grid_set = set(id(g) for g in tb_grids)
+    if tb_items:
+        cad = True
+
+    # Chữ nằm trong lưới bảng kẻ ô không thuộc dấu thẩm định
     in_grids = set()
     for g in grids:
-        if g is tb_grid:
+        if id(g) in tb_grid_set:
             continue
         gx0, gy0, gx1, gy1 = g["bbox"]
         g_items = [it for it in items if gx0 <= it["cx"] <= gx1 and gy0 <= it["cy"] <= gy1]
@@ -1112,14 +1363,17 @@ def analyze_page(ocr_res: List[Any], image=None, factor: float = 1.0, dpi: float
     excluded.update(id(it) for it in stamp_items)
 
     # Bảng kẻ ô: chỉ nhận lưới có chữ ở >= 15% số ô
-    # (ngưỡng 25% bỏ sót bảng cốt thép có nhiều ô gộp/ô đơn vị trống)
     for g in grids:
-        if g is tb_grid:
+        if id(g) in tb_grid_set:
             continue
         x0, y0, x1, y1 = g["bbox"]
         inside = [it for it in items if id(it) not in excluded
                   and x0 <= it["cx"] <= x1 and y0 <= it["cy"] <= y1]
         if len(inside) < 3:
+            continue
+        # Content safety net: loại trừ khung tên nếu chữ bên trong chứa >= 2 từ khóa khung tên mạnh
+        inside_key = fold_key(" ".join(it["text"] for it in inside))
+        if sum(1 for kw in TITLE_BLOCK_STRONG_KW if kw in inside_key) >= 2:
             continue
         filled = sum(1 for c in g["cells"]
                      if any(c[0] <= it["cx"] <= c[2] and c[1] <= it["cy"] <= c[3] for it in inside))
@@ -1127,9 +1381,18 @@ def analyze_page(ocr_res: List[Any], image=None, factor: float = 1.0, dpi: float
             continue
         title, title_items = _grid_title(g, items, excluded | set(id(it) for it in inside), med_h)
         t = make_table(grid_table_rows(g, inside), title, g["bbox"], "grid")
-        # Lưới nhỏ không tiêu đề cột thường là chi tiết hình vẽ, không phải bảng
         if not t or (not t["header"] and len(t["rows"]) <= 3):
             continue
+        # Trên bản vẽ CAD: phân biệt bảng kỹ thuật thật sự với hình vẽ mặt bằng/kết cấu chia ô
+        if cad:
+            is_table_by_title = has_kw(t.get("title", ""), ["BANG", "THONGKE", "KHOILUONG", "DANHMUC", "TOADO", "BANGKE", "QUYCACH", "CHITIEU"])
+            header_str = fold_key(" ".join(t.get("header") or []))
+            is_table_by_header = any(kw in header_str for kw in [
+                "STT", "KYHIEU", "TENTHANH", "DUONGKINH", "CHIEUDAI", "SOLUONG",
+                "TRONGLUONG", "KHOILUONG", "DONVI", "DONGIA", "THANHTIEN", "GIAIDOAN", "SOHIEU"
+            ])
+            if not is_table_by_title and not is_table_by_header:
+                continue
         ctx["tables"].append(t)
         excluded.update(id(it) for it in inside)
         excluded.update(id(it) for it in title_items)
@@ -1146,6 +1409,12 @@ def analyze_page(ocr_res: List[Any], image=None, factor: float = 1.0, dpi: float
     low = []
     stamp_ids = set(id(it) for it in stamp_items)
     tb_ids = set(id(it) for it in tb_items)
+    for g in tb_grids:
+        gx0, gy0, gx1, gy1 = g["bbox"]
+        for it in items:
+            if gx0 <= it["cx"] <= gx1 and gy0 <= it["cy"] <= gy1:
+                tb_ids.add(id(it))
+
     for it in items:
         if is_suspicious_for_review(it, stamp_ids, tb_ids):
             low.append({"text": it["text"], "score": round(it["score"], 3),
@@ -1162,6 +1431,10 @@ def analyze_page(ocr_res: List[Any], image=None, factor: float = 1.0, dpi: float
 
 def _render_cad(items, excluded, ctx, stamp_items, tb_items, meta, min_y, page_h) -> str:
     sections: List[str] = []
+    # Đặt banner bản vẽ kỹ thuật lên đầu trang
+    if tb_items or meta:
+        sections.append(render_title_block_banner(meta))
+
     view_items = [it for it in items if id(it) not in excluded and len(it["text"]) < 80
                   and has_kw(it["text"], VIEW_KW)
                   and (has_kw(it["text"], ["TYLE", "TL1"]) or it["y_min"] < min_y + 0.45 * page_h
@@ -1182,8 +1455,6 @@ def _render_cad(items, excluded, ctx, stamp_items, tb_items, meta, min_y, page_h
         sections.append(f"### GHI CHÚ / CHỮ KHÁC TRÊN BẢN VẼ\n\n{leftover_md}")
     if stamp_items:
         sections.append(render_stamp(stamp_items))
-    if tb_items:
-        sections.append(render_title_block(tb_items, meta))
     return "\n\n".join(sections)
 
 
