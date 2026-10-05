@@ -219,8 +219,22 @@ def fix_vietnamese_typos(text: str) -> str:
         _compiled_rules = [(re.compile(p, re.IGNORECASE), r)
                            for p, r in load_project_rules() + VIETNAMESE_AEC_RULES + load_custom_rules()]
     result = text
-    for pattern, replacement in _compiled_rules:
-        result = pattern.sub(lambda m, r=replacement: _match_case(m.group(0), m.expand(r)), result)
+    try:
+        from vn_diacritics import line_already_accented
+    except Exception:
+        line_already_accented = None
+    if line_already_accented is not None and any(line_already_accented(ln) for ln in result.split("\n")):
+        # Dòng đã có dấu (VietOCR / lớp chữ PDF): không chạy luật đoán dấu trên dòng đó
+        parts = []
+        for ln in result.split("\n"):
+            if not line_already_accented(ln):
+                for pattern, replacement in _compiled_rules:
+                    ln = pattern.sub(lambda m, r=replacement: _match_case(m.group(0), m.expand(r)), ln)
+            parts.append(ln)
+        result = "\n".join(parts)
+    else:
+        for pattern, replacement in _compiled_rules:
+            result = pattern.sub(lambda m, r=replacement: _match_case(m.group(0), m.expand(r)), result)
 
     # Khôi phục dấu tiếng Việt chuyên sâu từ chữ Latin bằng vn_diacritics
     try:

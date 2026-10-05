@@ -47,35 +47,91 @@ class AECExperienceEngine:
             "unsticking_rules": {},     # { "tudinh": "từ tách" }
             "table_header_aliases": {}, # { "alias": "standard_column" }
             "abbreviations": {},        # { "BTCT": "Bê tông cốt thép" } — học từ ĐỊNH NGHĨA trong văn bản
-            "term_glossary": {},        # { "cụm từ có dấu": tần suất tích lũy } — vốn từ corpus học được
+            "term_glossary": {},        # { "cụm từ có dấu": tần suất tích lũy } — vốn từ corpus học được (CHỈ thống kê, KHÔNG dùng để thêm dấu)
+            "verified_terms": {},       # { "cụm từ có dấu": [số lần, số hồ sơ] } — CHỈ học từ chữ đã chắc đúng (lớp chữ PDF / Word)
             "history_log": []           # [ { "doc": ..., "timestamp": ..., "lessons_learned": ... } ]
         }
         # Theo dõi phần ĐÃ nạp vào engine sống (idempotent — chống phình bộ nhớ khi đọc batch)
         self._injected_phrases: set = set()
         self._injected_unstick: set = set()
         self._injected_aliases: set = set()
+        self._verified_dirty = False
         self.load_db()
 
+    def _mirror_targets(self) -> List[Path]:
+        """Tự động tìm các bản đồng cấp (Lite ↔ Final2 ↔ Root) để đồng bộ song phương tri thức."""
+        targets = []
+        try:
+            cur_dir = self.db_path.resolve().parent
+            parent_dir = cur_dir.parent
+            candidates = [
+                parent_dir / "PDF_AI_Marker_v3_Lite" / "experience_db.json",
+                parent_dir / "PDF_AI_Marker_Windows_EXE_Final2" / "experience_db.json",
+                parent_dir / "experience_db.json",
+                cur_dir / "PDF_AI_Marker_v3_Lite" / "experience_db.json",
+                cur_dir / "PDF_AI_Marker_Windows_EXE_Final2" / "experience_db.json",
+            ]
+            seen = {self.db_path.resolve()}
+            for cand in candidates:
+                try:
+                    cand_res = cand.resolve()
+                    if (cand_res != self.db_path.resolve()
+                            and cand.parent.is_dir()
+                            and cand_res not in seen
+                            and (cand.exists() or (cand.parent / "marker_worker.py").exists())):
+                        targets.append(cand)
+                        seen.add(cand_res)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return targets
+
     def load_db(self):
-        """Nạp dữ liệu kinh nghiệm đã tích lũy từ tệp JSON."""
+        """Nạp dữ liệu kinh nghiệm đã tích lũy từ tệp JSON (tự đồng bộ từ bản mới nhất nếu có)."""
+        best_data = None
+        best_docs = -1
         if self.db_path.exists():
             try:
                 with self.db_path.open("r", encoding="utf-8") as f:
-                    saved = json.load(f)
-                    for k in self.knowledge:
-                        if k in saved:
-                            self.knowledge[k] = saved[k]
+                    best_data = json.load(f)
+                    best_docs = best_data.get("total_documents_read", 0)
             except Exception as e:
                 log.warning("Đọc experience_db lỗi: %s", e)
 
+        for peer in self._mirror_targets():
+            if peer.exists():
+                try:
+                    with peer.open("r", encoding="utf-8") as f:
+                        peer_data = json.load(f)
+                        peer_docs = peer_data.get("total_documents_read", 0)
+                        if peer_docs > best_docs:
+                            best_data = peer_data
+                            best_docs = peer_docs
+                except Exception:
+                    pass
+
+        if best_data:
+            for k in self.knowledge:
+                if k in best_data:
+                    self.knowledge[k] = best_data[k]
+
     def save_db(self):
-        """Lưu trữ dữ liệu kinh nghiệm xuống tệp JSON."""
+        """Lưu trữ dữ liệu kinh nghiệm xuống tệp JSON và tự động đồng bộ sang tất cả các bản đồng cấp."""
         self.knowledge["last_updated"] = datetime.now().isoformat()
         try:
             with self.db_path.open("w", encoding="utf-8") as f:
                 json.dump(self.knowledge, f, ensure_ascii=False, indent=2)
         except Exception as e:
             log.warning("Ghi experience_db lỗi: %s", e)
+
+        # Tự động đồng bộ tri thức sang các bản song hành (Lite ↔ Final2 ↔ Root)
+        for target in self._mirror_targets():
+            try:
+                with target.open("w", encoding="utf-8") as f:
+                    json.dump(self.knowledge, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                log.debug("Đồng bộ tri thức sang %s lỗi (bỏ qua): %s", target, e)
 
     # ─────────────────────────────────────────────────────────────────────────
     # HÀM PHỤ TRỢ TRÍCH XUẤT TRI THỨC THẬT TỪ NỘI DUNG
@@ -249,6 +305,72 @@ class AECExperienceEngine:
         return {"new_headers": new_headers}
 
     # ─────────────────────────────────────────────────────────────────────────
+    # HỌC TỪ CHỮ ĐÃ CHẮC ĐÚNG (lớp chữ PDF / Word) — nguồn duy nhất được dùng để THÊM DẤU
+    # ─────────────────────────────────────────────────────────────────────────
+    # Âm tiết tiếng Việt (sau khi bỏ dấu): [phụ âm đầu] + nguyên âm + [phụ âm cuối]
+    _VN_SYLLABLE = re.compile(
+        r"^(ngh|ng|nh|ch|gh|gi|kh|ph|qu|th|tr|b|c|d|g|h|k|l|m|n|p|r|s|t|v|x)?"
+        r"[aeiouy]{1,3}(ch|ng|nh|c|m|n|p|t)?$")
+    _SEGMENT_SPLIT = re.compile(r"[^\sA-Za-zÀ-ỹĐđ]+")   # cắt đoạn ở số, dấu câu, '|', ký hiệu
+    TRUSTED_METHODS = ("pdftext_fast", "pdftext_fast+shx_annot", "office_native")
+
+    @classmethod
+    def _is_vn_syllable(cls, word: str) -> bool:
+        w = cls._strip_accents(word).lower()
+        return 0 < len(w) <= 7 and bool(cls._VN_SYLLABLE.match(w))
+
+    @classmethod
+    def page_is_trustworthy(cls, text: str) -> bool:
+        """Cổng chất lượng: chỉ học trang có lớp chữ Unicode tiếng Việt chuẩn.
+        Loại: font TCVN3/VNI bị lỗi mã, lớp chữ bị cắt giữa âm tiết ('c' + 'ọc'), trang toàn mã hiệu."""
+        words = re.findall(r"[A-Za-zÀ-ỹĐđ]+", text or "")
+        if len(words) < 30:
+            return False
+        valid = sum(1 for w in words if cls._is_vn_syllable(w)) / len(words)
+        accented = sum(1 for w in words if cls._has_diacritic(w)) / len(words)
+        lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+        tiny = sum(1 for ln in lines if len(ln) <= 2) / max(1, len(lines))
+        return valid >= 0.90 and accented >= 0.25 and tiny < 0.08
+
+    def learn_verified_pages(self, page_texts: List[str], doc_name: str = "") -> Dict[str, int]:
+        """Học cụm 2–3 âm tiết CÓ DẤU từ các trang đáng tin. Không ghép n-gram qua xuống dòng,
+        số hay dấu câu (tránh mảnh vụn kiểu 'quang chủ đầu'). Mỗi hồ sơ chỉ tính 1 lần vào 'số hồ sơ'."""
+        store = self.knowledge.setdefault("verified_terms", {})
+        doc_counts: Dict[str, int] = {}
+        used_pages = 0
+        for text in page_texts or []:
+            if not self.page_is_trustworthy(text):
+                continue
+            used_pages += 1
+            for line in text.splitlines():
+                for seg in self._SEGMENT_SPLIT.split(line):
+                    words = seg.split()
+                    for n in (2, 3):
+                        for i in range(len(words) - n + 1):
+                            gram = words[i:i + n]
+                            low = [unicodedata.normalize("NFC", w).lower() for w in gram]
+                            if low[0] in self._STOPWORDS or low[-1] in self._STOPWORDS:
+                                continue
+                            if not all(self._is_vn_syllable(w) for w in low):
+                                continue
+                            if not any(self._has_diacritic(w) for w in low):
+                                continue
+                            key = " ".join(low)
+                            doc_counts[key] = doc_counts.get(key, 0) + 1
+        new = 0
+        for key, c in doc_counts.items():
+            stat = store.get(key)
+            if stat is None:
+                store[key] = [c, 1]
+                new += 1
+            else:
+                stat[0] += c
+                stat[1] += 1
+        if new or doc_counts:
+            self._verified_dirty = True
+        return {"verified_pages": used_pages, "new_verified_terms": new}
+
+    # ─────────────────────────────────────────────────────────────────────────
     # ĐỒNG BỘ VÀ NẠP TỨC THÌ (HOT-RELOAD) VÀO BỘ MÁY OCR & TABLE AGENT
     # ─────────────────────────────────────────────────────────────────────────
     def sync_to_live_engines(self):
@@ -264,13 +386,22 @@ class AECExperienceEngine:
         try:
             import vn_diacritics
             changed = False
-            # 1. Nạp 1 lần các cụm từ ghép GỐC (learned_phrases nạp sẵn từ DB), không lặp lại
+            # 1. Nạp 1 lần các cụm từ ghép GỐC (learned_phrases nạp sẵn từ DB)
             for raw_k, phr in self.knowledge.get("learned_phrases", {}).items():
                 if raw_k in self._injected_phrases:
                     continue
                 vn_diacritics.AEC_COMPOUND_PHRASES.append((raw_k, phr))
                 self._injected_phrases.add(raw_k)
                 changed = True
+                
+            # 1.5. KHÔNG bơm term_glossary (học từ kết quả OCR chưa kiểm tra → chứa lỗi lặp lại như
+            #      'trinh xây dựng', 'thiét ke' và cả chữ cảnh báo của chính phần mềm).
+            #      Cụm từ đã kiểm chứng (verified_terms) do VietnameseDiacriticRestorer tự nạp từ DB
+            #      và áp dụng SAU bộ cụm từ gốc → chỉ cần dựng lại restorer khi có dữ liệu mới.
+            if getattr(self, "_verified_dirty", False):
+                changed = True
+                self._verified_dirty = False
+
             # 2. Nạp quy tắc tách từ dính (chỉ phần mới)
             for k, repl in self.knowledge.get("unsticking_rules", {}).items():
                 if k in self._injected_unstick:
@@ -278,7 +409,10 @@ class AECExperienceEngine:
                 vn_diacritics.AEC_UNSTICKING_RULES.insert(0, (r"\b" + re.escape(k) + r"\b", repl))
                 self._injected_unstick.add(k)
                 changed = True
+            
             if changed:
+                # Sắp xếp lại để ưu tiên cụm từ dài nhất trước
+                vn_diacritics.AEC_COMPOUND_PHRASES.sort(key=lambda x: len(x[0].split()), reverse=True)
                 vn_diacritics._DEFAULT_RESTORER = None   # dựng lại lười ở lần restore kế tiếp
         except Exception as e:
             log.warning("Đồng bộ vn_diacritics lỗi: %s", e)
@@ -506,6 +640,7 @@ class AECExperienceEngine:
                 "table_aliases": len(self.knowledge["table_header_aliases"]),
                 "terms": len(self.knowledge["term_glossary"]),
                 "ocr_corrections": len(self.knowledge.get("ocr_corrections", {})),
+                "verified_terms": len(self.knowledge.get("verified_terms", {})),
             }
         }
         self.knowledge["history_log"].append(entry)
@@ -521,7 +656,8 @@ class AECExperienceEngine:
             "🎓 BÁO CÁO TIẾN HÓA BỘ NÃO KINH NGHIỆM AEC (EXPERIENCE ENGINE)",
             "==================================================================",
             f"📁 Tổng số hồ sơ đã học: {k['total_documents_read']}",
-            f"📚 Vốn từ chuyên ngành học từ corpus: {len(k.get('term_glossary', {}))} cụm",
+            f"📚 Vốn từ chuyên ngành học từ corpus: {len(k.get('term_glossary', {}))} cụm (chỉ thống kê)",
+            f"✅ Cụm từ đã kiểm chứng (lớp chữ PDF/Word): {len(k.get('verified_terms', {}))} cụm",
             f"🏷️  Từ viết tắt TỰ ĐỊNH NGHĨA học được: {len(k['abbreviations'])} từ",
             f"⚡ Quy tắc tách từ dính scan CAD: {len(k['unsticking_rules'])} quy tắc",
             f"📊 Biến thể tiêu đề bảng BoQ/Thép: {len(k['table_header_aliases'])} biến thể",

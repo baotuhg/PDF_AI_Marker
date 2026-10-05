@@ -285,27 +285,56 @@ def run_rapid_ocr(request, session, vietnamese=False):
 
     engine, device = make_rapid_engine()
     refiner = None
+    reader = ""
     if vietnamese:
+        # Chọn bộ đọc dấu: PDF_AI_VN_READER = auto | surya | vietocr
+        #   auto: Surya khi có GPU NVIDIA (bản Full); không có GPU -> VietOCR ONNX
+        #   (Surya trên CPU mất vài phút/trang; VietOCR ghép lai chỉ vài giây/trang).
+        choice = os.environ.get("PDF_AI_VN_READER", "auto").strip().lower()
         try:
-            import surya
-            from vn_refine import SuryaRefiner
-            refiner = SuryaRefiner()
-            refiner._get_manager()
-            if os.environ.get("TORCH_DEVICE") != "cuda":
-                emit("progress", message=(
-                    "⚠️ Không thấy GPU NVIDIA: Surya đọc dấu trên CPU sẽ RẤT chậm (vài phút/trang). "
-                    "Có thể dùng chế độ 'Quét OCR nhanh' (không dấu) thay thế."))
+            import vn_vietocr
+            viet_ok = vn_vietocr.available()
         except Exception:
-            refiner = None
+            viet_ok = False
+        try_surya = choice == "surya" or (choice == "auto" and (os.environ.get("TORCH_DEVICE") == "cuda" or not viet_ok))
+        if try_surya and choice != "vietocr":
+            try:
+                import surya
+                from vn_refine import SuryaRefiner
+                refiner = SuryaRefiner()
+                refiner._get_manager()
+                reader = "Surya"
+                if os.environ.get("TORCH_DEVICE") != "cuda":
+                    emit("progress", message=(
+                        "⚠️ Không thấy GPU NVIDIA: Surya đọc dấu trên CPU sẽ RẤT chậm (vài phút/trang). "
+                        "Có thể dùng chế độ 'Quét OCR nhanh' (không dấu) thay thế."))
+            except Exception:
+                refiner = None
+        if refiner is None and viet_ok:
+            # VietOCR ONNX đọc dấu + RapidOCR giữ số liệu (không cần PyTorch/GPU)
+            try:
+                refiner = vn_vietocr.VietOCRRefiner()
+                refiner._get()
+                reader = "VietOCR"
+            except Exception as e:
+                refiner = None
+                emit("progress", message=f"[Cảnh báo] Không nạp được VietOCR: {type(e).__name__}: {e}")
+        if refiner is None:
             emit("progress", message="⚡ Bản Lite: Tự động dùng Bộ Phục Hồi Dấu Tiếng Việt AEC Siêu Tốc (Offline).")
     emit("progress", message=(
         f"[{tag} 1/3] Tài liệu OK — {total} trang, sẽ xử lý {n_pages} trang. "
-        f"Định vị chữ: {device}" + (" • Đọc dấu: Surya" if (vietnamese and refiner is not None) else " • Dấu: AEC Offline")), percent=5)
+        f"Định vị chữ: {device}" + (f" • Đọc dấu: {reader} (+ AEC Offline)" if (vietnamese and refiner is not None)
+                                    else " • Dấu: AEC Offline")), percent=5)
 
     doc = pdfium.PdfDocument(str(input_file))
     pages = []
     t0 = time.monotonic()
-    method = "rapid_ocr+surya_vi" if (vietnamese and refiner is not None) else "rapid_ocr"
+    if vietnamese and reader == "Surya":
+        method = "rapid_ocr+surya_vi"
+    elif vietnamese and reader == "VietOCR":
+        method = "rapid_ocr+vietocr_vi"
+    else:
+        method = "rapid_ocr"
     try:
         for idx, page_num in enumerate(selected, 1):
             page = doc[page_num]
@@ -328,7 +357,7 @@ def run_rapid_ocr(request, session, vietnamese=False):
     finally:
         doc.close()
         if refiner is not None:
-            emit("progress", message=f"[{tag}] Surya: {refiner.stats}")
+            emit("progress", message=f"[{tag}] {reader}: {refiner.stats}")
             refiner.close()
 
     total_sec = round(time.monotonic() - started, 1)
@@ -392,7 +421,7 @@ NGUỒN CHỮ (trường "method" của mỗi trang trong du_lieu.json)
 - pdftext_fast: lớp chữ của PDF — chính xác như bản gốc.
 - +shx_annot: chữ font SHX của AutoCAD đọc từ chú thích "AutoCAD SHX Text" — chính xác.
 - +ocr_vector_text / +ocr_mixed_shx / +ocr_scan: chữ SHX bị vẽ thành nét hoặc ảnh scan, đã OCR bổ sung — có thể thiếu dấu tiếng Việt và sai số, cần đối chiếu.
-- rapid_ocr / rapid_ocr+surya_vi: toàn trang được OCR.
+- rapid_ocr / rapid_ocr+surya_vi / rapid_ocr+vietocr_vi: toàn trang được OCR (+surya_vi / +vietocr_vi: dấu tiếng Việt do Surya / VietOCR đọc lại, số liệu giữ theo RapidOCR).
 
 KÝ HIỆU ĐỘ TIN CẬY
 - "⟦OCR khác: ...⟧": hai bộ OCR đọc khác nhau ở chữ số. Phần trước là bản đọc có dấu, phần trong ngoặc là bản đọc thứ hai. PHẢI coi số liệu này là chưa chắc chắn.
@@ -691,6 +720,10 @@ def write_outputs(result, mode, source, total, pages, chunks, total_sec, max_cha
             from experience_engine import get_experience_engine
             exp_engine = get_experience_engine()
             t_lessons = exp_engine.distill_text_experience(full_md, doc_name=source.name)
+            # Học dấu CHỈ từ trang đọc thẳng lớp chữ PDF / Word (không qua OCR) → chữ đã chắc đúng
+            trusted = [p.get("text", "") for p in pages
+                       if p.get("method") in exp_engine.TRUSTED_METHODS]
+            t_lessons.update(exp_engine.learn_verified_pages(trusted, doc_name=source.name))
             tbl_lessons = exp_engine.distill_table_experience(tables)
             combined_lessons = {**t_lessons, **tbl_lessons}
             epoch_info = exp_engine.record_epoch(source.name, len(pages), combined_lessons)

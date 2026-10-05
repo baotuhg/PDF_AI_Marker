@@ -772,6 +772,55 @@ def _apply_correction(span: str, corrected: str) -> str:
     return corrected
 
 
+def _strip_vn(s: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", s)
+                   if unicodedata.category(c) != "Mn").replace("đ", "d").replace("Đ", "D")
+
+
+# Ngưỡng nhận một cụm từ đã kiểm chứng làm luật thêm dấu
+VERIFIED_MIN_COUNT = 3      # xuất hiện >= 3 lần
+VERIFIED_MIN_DOCS = 2       # trong >= 2 hồ sơ khác nhau
+VERIFIED_MIN_SHARE = 0.90   # dạng có dấu này chiếm >= 90% mọi cách viết của cùng chữ không dấu
+
+
+def build_verified_map(verified_terms: Dict, min_count: int = VERIFIED_MIN_COUNT,
+                       min_docs: int = VERIFIED_MIN_DOCS,
+                       min_share: float = VERIFIED_MIN_SHARE) -> Dict[str, str]:
+    """{ 'cum tu khong dau': 'cụm từ có dấu' } chỉ gồm các cụm KHÔNG mơ hồ.
+    Ví dụ 'ban ve' -> 'bản vẽ' được nhận; còn chữ không dấu ứng với nhiều cách viết
+    ngang nhau (bàn / bán / bản) thì bị bỏ để không đoán bừa."""
+    groups: Dict[str, List[Tuple[int, int, str]]] = {}
+    for phrase, stat in (verified_terms or {}).items():
+        if isinstance(stat, (list, tuple)):
+            c, d = int(stat[0]), int(stat[1])
+        else:
+            c, d = int(stat), 1
+        key = _strip_vn(phrase).lower()
+        if key == phrase:
+            continue
+        groups.setdefault(key, []).append((c, d, phrase))
+    out: Dict[str, str] = {}
+    for key, variants in groups.items():
+        total = sum(v[0] for v in variants)
+        c, d, phrase = max(variants)
+        if c >= min_count and d >= min_docs and c / max(1, total) >= min_share:
+            out[key] = phrase
+    return out
+
+
+_WORD_RE = re.compile(r"[A-Za-zÀ-ỹĐđ]+")
+_VN_DIACRITIC_RE = re.compile(r"[À-ÃÈ-ÊÌÍÒ-ÕÙÚÝà-ãè-êìíò-õùúýĂăĐđĨĩŨũƠơƯưẠ-ỹ]")
+
+
+def line_already_accented(line: str, min_words: int = 3, min_share: float = 0.4) -> bool:
+    """Dòng đã có dấu tiếng Việt thật (VietOCR, lớp chữ PDF) chứ không phải vài dấu lẻ do
+    RapidOCR sinh nhầm ('dién', 'tuyén'). Ngưỡng: >= 3 chữ và >= 40% chữ mang dấu."""
+    words = [w for w in _WORD_RE.findall(line or "") if len(w) >= 2]
+    if len(words) < min_words:
+        return False
+    return sum(1 for w in words if _VN_DIACRITIC_RE.search(w)) / len(words) >= min_share
+
+
 class VietnameseDiacriticRestorer:
     """
     Engine phục hồi dấu tiếng Việt từ văn bản Latin không dấu.
@@ -798,6 +847,7 @@ class VietnameseDiacriticRestorer:
 
         # 4. Sửa lỗi OCR do NGƯỜI dùng xác nhận (literal, an toàn) — áp dụng cuối cùng.
         self.correction_rules: List[Tuple] = []
+        self.verified_map: Dict[str, str] = {}
 
         # 5. Tự động nạp kinh nghiệm tích lũy từ experience_db.json
         try:
@@ -814,6 +864,10 @@ class VietnameseDiacriticRestorer:
                         words = raw_k.split()
                         regex_pat = r"\b" + r"\s+".join(re.escape(w) for w in words) + r"\b"
                         self.phrase_rules.insert(0, (re.compile(regex_pat, re.IGNORECASE), phr))
+                    
+                    # Cụm từ ĐÃ KIỂM CHỨNG (học từ lớp chữ PDF/Word) — tra từ điển, áp dụng SAU cụm từ gốc.
+                    # (Không nạp term_glossary: học từ OCR chưa kiểm tra nên chứa lỗi lặp lại.)
+                    self.verified_map = build_verified_map(data.get("verified_terms", {}))
                     # Nạp các cặp sửa lỗi OCR AN TOÀN (chỉ chữ, đã được người dùng xác nhận)
                     for raw, entry in (data.get("ocr_corrections", {}) or {}).items():
                         if isinstance(entry, dict):
@@ -836,10 +890,57 @@ class VietnameseDiacriticRestorer:
         self.correction_rules.append((re.compile(pat, re.IGNORECASE), corrected))
         return True
 
+    def _apply_verified(self, text: str) -> str:
+        """Tra từ điển cụm 3 rồi 2 âm tiết. Chỉ khớp khi các chữ cách nhau đúng khoảng trắng
+        và đều KHÔNG dấu (chữ đã có dấu không bao giờ bị ghi đè)."""
+        if not self.verified_map or not text:
+            return text
+        words = list(_WORD_RE.finditer(text))
+        if len(words) < 2:
+            return text
+        out, pos, i = [], 0, 0
+        while i < len(words):
+            done = False
+            for n in (3, 2):
+                if i + n > len(words):
+                    continue
+                span = words[i:i + n]
+                seps = [text[a.end():b.start()] for a, b in zip(span, span[1:])]
+                if any(not s.isspace() or "\n" in s for s in seps):
+                    continue
+                key = " ".join(w.group(0).lower() for w in span)
+                repl = self.verified_map.get(key)
+                if repl:
+                    s, e = span[0].start(), span[-1].end()
+                    out.append(text[pos:s])
+                    out.append(match_case(text[s:e], repl))
+                    pos, i, done = e, i + n, True
+                    break
+            if not done:
+                i += 1
+        out.append(text[pos:])
+        return "".join(out)
+
     def restore(self, text: str) -> str:
         """Khôi phục dấu tiếng Việt cho chuỗi văn bản."""
         if not text:
             return ""
+        # Dòng ĐÃ có dấu đầy đủ (VietOCR / lớp chữ PDF) -> không đoán dấu nữa, chỉ áp sửa lỗi
+        # người dùng đã xác nhận. Tránh 'khe co giãn' -> 'khe có giãn', 'lan can' -> 'lân cận'.
+        lines = text.split("\n")
+        if any(line_already_accented(ln) for ln in lines):
+            return "\n".join(self._apply_corrections(ln) if line_already_accented(ln) else self._restore_raw(ln)
+                             for ln in lines)
+        return self._restore_raw(text)
+
+    def _apply_corrections(self, text: str) -> str:
+        for comp, corrected in self.correction_rules:
+            text = comp.sub(lambda m, c=corrected: _apply_correction(m.group(0), c), text)
+        return text
+
+    def _restore_raw(self, text: str) -> str:
+        if not text:
+            return text
         result = text
 
         # Bước 1: Tách từ dính OCR
@@ -855,9 +956,18 @@ class VietnameseDiacriticRestorer:
         for comp, repl in self.context_rules:
             result = comp.sub(lambda m, r=repl: _context_sub(m, r), result)
 
-        # Bước 4: Sửa lỗi OCR do người dùng xác nhận (literal) — đặt cuối để "chốt" kết quả.
+        # Bước 4: Sửa lỗi OCR do NGƯỜI dùng xác nhận (literal) — "chốt" theo đúng cặp
+        # chữ người dùng đã dạy, nên phải chạy TRƯỚC khi tra từ điển cụm từ.
         for comp, corrected in self.correction_rules:
             result = comp.sub(lambda m, c=corrected: _apply_correction(m.group(0), c), result)
+
+        # Bước 4b: Cụm từ ĐÃ KIỂM CHỨNG — tra từ điển, áp SAU CÙNG.
+        # Bắt buộc đặt sau Bước 3 và Bước 4: hai bước này khớp mẫu trên chữ CÒN NGUYÊN
+        # KHÔNG DẤU (lookahead kiểu 'da' + động từ, hay cặp literal 'chiu lyrc').
+        # Nếu tra từ điển trước, nó gán dấu sớm làm mất ngữ cảnh và hai bước kia
+        # không còn khớp: 'da thi cong' -> 'da thi công' (thiếu 'đã'),
+        # 'ket cau chiu lyrc' -> không áp được cặp sửa 'chiu lyrc' -> 'chịu lực'.
+        result = self._apply_verified(result)
 
         return result
 
