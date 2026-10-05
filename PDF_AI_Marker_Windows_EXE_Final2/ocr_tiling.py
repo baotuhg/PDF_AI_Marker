@@ -9,7 +9,9 @@ các ô <= 2000px có vùng chồng lấn, OCR từng ô rồi ghép và khử t
 Tọa độ trả về được quy đổi về "hệ tọa độ cơ sở" (scale cũ ~1.0–1.5) để các
 ngưỡng pixel trong layout_reconstructor vẫn giữ nguyên ý nghĩa.
 """
-from typing import Any, List, Tuple
+import re
+import unicodedata
+from typing import Any, List, Optional, Tuple
 
 # ── GPU ACCELERATION SETTINGS (NVIDIA RTX / DirectML) ────────────────────────
 RENDER_DPI = 240          # Chữ 2.0mm trên bản vẽ ~ 27px -> Nhìn rõ từng nét chữ nhỏ, số mũ và phi Φ
@@ -138,6 +140,159 @@ def ocr_image_tiled(engine, pil_img) -> List[List[Any]]:
     return [entry for _, entry in kept]
 
 
+# ── HẬU KIỂM CHỐNG LẬT 180° ─────────────────────────────────────────────────
+# Bộ phân loại hướng chữ (use_cls=True) là CẦN THIẾT cho bản vẽ CAD: nó đọc
+# đúng nhãn kích thước xoay 90/270 và bắt thêm hộp chữ (đo trên bản vẽ thép:
+# 166 hộp / 17 mẫu '52@150' so với 154 / 8 khi tắt cls). Nhưng với DÒNG CHỮ
+# NGANG đứng thẳng, nó phán đoán nhầm là lộn ngược -> khâu nhận dạng đọc ảnh
+# đã lật và trả về chuỗi đảo ngược, ví dụ trang 1 Nghị định 15/2021:
+#   'upnb ga Sunp 1ou gs 1ou 1g lyo yuip Knb yuip iy8N yupy upq nyd yuiyd'
+#   đúng phải là 'Chính phủ ban hành Nghị định quy định chi tiết một số…'
+# Dấu hiệu nhận biết: điểm "giống tiếng Việt" thấp (0.36–0.71 so với 0.93–1.0
+# của dòng đúng). Cách chữa: đọc LẠI chính vùng ảnh đó bằng bộ máy không-cls
+# rồi chỉ nhận khi kết quả mới tốt hơn hẳn — nhờ vậy bản vẽ CAD (vốn đã đúng
+# từ đầu) không bị thay đổi.
+_ONSETS = ("ngh", "ng", "nh", "ch", "gh", "gi", "kh", "ph", "qu", "th", "tr",
+           "b", "c", "d", "g", "h", "k", "l", "m", "n", "p", "r", "s", "t", "v", "x")
+_CODAS = ("ch", "ng", "nh", "c", "m", "n", "p", "t")
+# Cụm nguyên âm (âm đệm+âm chính+âm cuối vần) CÓ THẬT trong tiếng Việt.
+# Phải liệt kê thay vì cho phép mọi cụm 1–3 nguyên âm: nếu chỉ kiểm tra "toàn
+# nguyên âm", chữ lật vẫn lọt ('yui' trong 'yuip' trông hợp lệ) và bộ đo mất
+# tác dụng phân biệt.
+_NUCLEI = {
+    "a", "ai", "ao", "au", "ay",
+    "e", "eo", "eu",
+    "i", "ia", "ie", "iu", "ieu",
+    "o", "oa", "oai", "oao", "oay", "oe", "oeo", "oi", "oo",
+    "u", "ua", "uay", "ue", "ui", "uo", "uoi", "uou", "uy", "uya", "uye", "uyu",
+    "y", "ye", "yeu",
+}
+_VN_WORD_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
+
+FLIP_MIN_TOKENS = 6        # ít token quá thì là nhãn/mã hiệu, không đủ ngữ cảnh phán đoán
+FLIP_MAX_SCORE = 0.78      # dưới ngưỡng này coi là nghi bị lật
+FLIP_ACCEPT_SCORE = 0.85   # bản đọc lại phải thật sạch mới được thay thế
+FLIP_ACCEPT_MARGIN = 0.10  # và phải hơn bản cũ một khoảng rõ rệt
+# Dòng văn xuôi chủ yếu là chữ cái; dòng kích thước CAD thì không. Đo trên dòng
+# lật thật gặp tỉ lệ 0.66 (có lẫn chữ số), nên ngưỡng phải dưới mức đó — 0.70
+# ban đầu bỏ sót hẳn một số hộp. Bù lại, khâu "chấp nhận" bên dưới đã chặt.
+FLIP_LETTER_RATIO = 0.45
+# Bản đọc lại lệch độ dài bao nhiêu là bất thường. So theo SỐ CHỮ CÁI (bỏ dấu
+# câu/khoảng trắng) chứ không theo độ dài chuỗi, và biên rộng: chữ bị lật mất
+# hẳn ký tự nên tỉ lệ thật có thể tới ~1.6 ('u uo e u in yuip…' dài 35 chữ cái
+# so với bản đúng 55). Đây chỉ là lưới an toàn phụ; tín hiệu chính là điểm.
+FLIP_LEN_LO, FLIP_LEN_HI = 0.5, 2.5
+_UPRIGHT_ENGINE = None
+
+
+def _strip_vn(s: str) -> str:
+    s = s.replace("đ", "d").replace("Đ", "D")
+    return "".join(c for c in unicodedata.normalize("NFD", s)
+                   if unicodedata.category(c) != "Mn").lower()
+
+
+def _is_vn_syllable(tok: str) -> bool:
+    """'hop', 'chinh', 'nguon' -> True; 'upnb', 'yuip', 'iy8n' -> False."""
+    if not (1 <= len(tok) <= 7):
+        return False
+    for on in _ONSETS + ("",):
+        if on and not tok.startswith(on):
+            continue
+        rest = tok[len(on):]
+        for cd in _CODAS + ("",):
+            if cd and not rest.endswith(cd):
+                continue
+            body = rest[:len(rest) - len(cd)] if cd else rest
+            if body in _NUCLEI:
+                return True
+    return False
+
+
+def vn_likeness(text: str) -> Optional[float]:
+    """Tỉ lệ âm tiết tiếng Việt hợp lệ trên tổng token chữ (>=2 ký tự).
+    Trả None khi quá ít token để phán đoán an toàn."""
+    toks = [_strip_vn(t) for t in _VN_WORD_RE.findall(text or "") if len(t) >= 2]
+    if len(toks) < FLIP_MIN_TOKENS:
+        return None
+    return sum(1 for t in toks if _is_vn_syllable(t)) / len(toks)
+
+
+def _upright_engine():
+    """Bộ máy OCR KHÔNG bật cls, dùng riêng cho khâu đọc lại. Nạp muộn để những
+    trang không bị lật không phải chịu thêm chi phí bộ nhớ."""
+    global _UPRIGHT_ENGINE
+    if _UPRIGHT_ENGINE is None:
+        from rapidocr_onnxruntime import RapidOCR
+        kwargs = dict(max_side_len=3000, det_limit_side_len=1536,
+                      det_limit_type="max", det_thresh=0.25, det_unclip_ratio=1.8)
+        try:
+            import onnxruntime
+            if "DmlExecutionProvider" in onnxruntime.get_available_providers():
+                kwargs.update(det_use_dml=True, rec_use_dml=True)
+        except Exception:
+            pass
+        _UPRIGHT_ENGINE = RapidOCR(use_cls=False, **kwargs)
+    return _UPRIGHT_ENGINE
+
+
+def repair_flipped_boxes(results, pil_img) -> int:
+    """Đọc lại bằng bộ máy không-cls những hộp nghi bị lật 180°; sửa tại chỗ.
+    Trả về số hộp đã sửa. Chỉ thay khi bản mới sạch hơn hẳn (xem các ngưỡng FLIP_*)."""
+    if not results:
+        return 0
+    cand = []
+    for i, e in enumerate(results):
+        txt = str(e[1])
+        letters = sum(1 for c in txt if c.isalpha())
+        if not txt or letters / len(txt) < FLIP_LETTER_RATIO:
+            continue                       # dòng mã hiệu / kích thước — không đủ ngữ cảnh
+        sc = vn_likeness(txt)
+        if sc is not None and sc < FLIP_MAX_SCORE:
+            cand.append((i, e, sc, txt))
+    if not cand:
+        return 0
+    try:
+        eng = _upright_engine()
+    except Exception:
+        return 0                           # thiếu bộ máy -> giữ nguyên, không làm hỏng kết quả
+    width, height = pil_img.size
+    fixed = 0
+    for _i, e, old_sc, old_txt in cand:
+        xs = [float(p[0]) for p in e[0]]
+        ys = [float(p[1]) for p in e[0]]
+        old_letters = sum(1 for c in old_txt if c.isalpha())
+        best = None
+        # Cắt sát hộp (pad nhỏ) có thể cụt nét chữ và làm điểm tụt dưới ngưỡng chấp
+        # nhận — đo trên hồ sơ thật: cùng một dòng, pad=4 chỉ đạt 0.833 còn nới lề
+        # ngang lên 20 đạt 0.889. Nên thử vài mức lề và lấy bản đọc SẠCH NHẤT.
+        for pad_x, pad_y in ((4, 4), (20, 4), (60, 4), (20, 14)):
+            box = (max(0, int(min(xs)) - pad_x), max(0, int(min(ys)) - pad_y),
+                   min(width, int(max(xs)) + pad_x), min(height, int(max(ys)) + pad_y))
+            if box[2] - box[0] < 8 or box[3] - box[1] < 8:
+                continue
+            try:
+                res2, _ = eng(pil_img.crop(box).convert("RGB"))
+            except Exception:
+                continue
+            if not res2:
+                continue
+            new_txt = " ".join(str(r[1]).strip() for r in res2 if str(r[1]).strip())
+            new_sc = vn_likeness(new_txt)
+            if new_sc is None or new_sc < FLIP_ACCEPT_SCORE or new_sc < old_sc + FLIP_ACCEPT_MARGIN:
+                continue
+            new_letters = sum(1 for c in new_txt if c.isalpha())
+            if old_letters and not (FLIP_LEN_LO <= new_letters / old_letters <= FLIP_LEN_HI):
+                continue                   # đổi độ dài quá nhiều -> nghi đọc hỏng, giữ bản cũ
+            if best is None or new_sc > best[0]:
+                best = (new_sc, new_txt)
+        if best is not None:
+            e[1] = best[1]
+            if len(e) > 3:
+                e[3] = None                # vị trí ký tự không còn khớp với chữ mới
+            fixed += 1
+    return fixed
+
+
 def make_rapid_engine():
     """RapidOCR chạy trên GPU qua DirectML (NVIDIA GeForce RTX 4070 / DX12).
     Khai thác tối đa sức mạnh GPU rời:
@@ -241,6 +396,12 @@ def ocr_pdf_page(engine, page, refiner=None, with_image: bool = False):
                 pil_img = img_270
                 results = res_270
                 pw, ph = ph, pw
+
+    # Sau khi đã chốt chiều trang: đọc lại những hộp nghi bị cls lật ngược.
+    try:
+        repair_flipped_boxes(results, pil_img)
+    except Exception:
+        pass
 
     before = [e[1] for e in results]
     if refiner is not None and results:

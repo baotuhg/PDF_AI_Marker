@@ -221,6 +221,47 @@ def test_ap_dung_khong_dung_cho_so():
     assert "25" in out and "26" not in out, out
 
 
+# ── (H) HỌC TỪ CHỮ ĐÃ CHẮC ĐÚNG (lớp chữ PDF/Word) ────────────────────────────
+GOOD_PAGE = ("Thi công cọc khoan nhồi theo bản vẽ thiết kế được duyệt. Bê tông cọc khoan nhồi phải "
+             "đảm bảo cường độ thiết kế. Trình tự thi công xây dựng công trình cầu tuân thủ chỉ dẫn "
+             "kỹ thuật. Nhà thầu thi công xây dựng kiểm tra hố khoan trước khi đổ bê tông.\n") * 2
+BROKEN_PAGE = "D\nự án cao tốc\nc\nọc khoan\nb\nệ móng\nm\nố trụ\n" * 10
+OCR_LIKE = ("Thi cong coc khoan nhoi theo ban ve thiet ke duoc duyet. Be tong coc khoan nhoi phai "
+            "dam bao cuong do thiet ke va trinh tu thi cong xay dung cong trinh.\n") * 3
+
+
+def test_cong_loc_trang_tin_cay():
+    assert AECExperienceEngine.page_is_trustworthy(GOOD_PAGE)
+    assert not AECExperienceEngine.page_is_trustworthy(BROKEN_PAGE)   # lớp chữ cắt giữa âm tiết
+    assert not AECExperienceEngine.page_is_trustworthy(OCR_LIKE)      # chữ không dấu kiểu OCR
+
+
+def test_hoc_verified_va_khong_qua_dong():
+    e = _fresh_engine()
+    st = e.learn_verified_pages([GOOD_PAGE, BROKEN_PAGE, OCR_LIKE], doc_name="a")
+    assert st["verified_pages"] == 1, st
+    vt = e.knowledge["verified_terms"]
+    assert vt["cọc khoan nhồi"][0] >= 2 and vt["cọc khoan nhồi"][1] == 1
+    # n-gram không được nối qua dấu chấm ('...được duyệt. Bê tông...')
+    assert "duyệt bê" not in vt and "duyệt bê tông" not in vt, [k for k in vt if "duyệt" in k]
+    assert not any("." in k for k in vt)
+
+
+def test_restorer_dung_verified_khong_mo_ho_va_khong_ghi_de():
+    import vn_diacritics as vd
+    terms = {"cọc khoan nhồi": [9, 3], "bản vẽ": [20, 5],
+             "bàn ghế": [4, 2], "bán ghế": [4, 2],          # mơ hồ 50/50 -> bỏ
+             "trình xây dựng": [10, 1]}                     # chỉ 1 hồ sơ -> bỏ
+    m = vd.build_verified_map(terms)
+    assert m.get("coc khoan nhoi") == "cọc khoan nhồi"
+    assert "ban ghe" not in m and "trinh xay dung" not in m, m
+    r = vd.VietnameseDiacriticRestorer()
+    r.verified_map = {"coc khoan nhoi": "cọc khoan nhồi", "khoan nhoi": "khoan nhồi"}
+    assert r._apply_verified("Thi cong COC KHOAN NHOI") == "Thi cong CỌC KHOAN NHỒI"
+    assert r._apply_verified("coc\nkhoan nhoi") == "coc\nkhoan nhồi"        # không nối qua dòng
+    assert r._apply_verified("cọc khoan nhồi") == "cọc khoan nhồi"          # chữ có dấu giữ nguyên
+
+
 # ── Hàm phụ trợ ───────────────────────────────────────────────────────────────
 def test_acronym_matches():
     assert AECExperienceEngine._acronym_matches("BTCT", "Bê tông cốt thép") is True

@@ -461,6 +461,18 @@ def get_license_status() -> dict:
        "customer": str        # Tên khách hàng (nếu có)
     }
     """
+    # [BYPASS LISCEY] Bỏ qua kiểm tra bản quyền theo yêu cầu nội bộ
+    return {
+        "ok": True,
+        "status": "ACTIVE",
+        "plan": "LIFETIME",
+        "plan_name": "Pro Lifetime (Internal)",
+        "machine_id": "INTERNAL_USE",
+        "expire_date": "2099-12-31",
+        "message": "Bản quyền đã được mở khóa vô thời hạn cho sử dụng nội bộ.",
+        "days_left": 9999,
+        "customer": "Công ty 307"
+    }
     now = datetime.datetime.now(datetime.timezone.utc)
     machine_id = _get_machine_id()
     local_lic_path = _license_path()

@@ -89,6 +89,72 @@ def _strip_accents(s: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", s) if not unicodedata.combining(c)).upper()
 
 
+def _has_rebar_signature(headers: List[str]) -> bool:
+    """Chữ ký QUYẾT ĐỊNH của bảng thống kê cốt thép: có cột ĐƯỜNG KÍNH, kèm >= 2 trong
+    các cột chỉ riêng bảng thép mới có (chiều dài thanh / số lượng thanh / kg trên mét /
+    khối lượng đơn vị). Bảng BoQ thật chỉ có khối lượng - đơn giá - thành tiền, KHÔNG bao
+    giờ có cột đường kính thanh đi kèm chiều dài và số lượng thanh.
+
+    Cần luật này vì cách chấm điểm theo từ khóa để lọt bảng kiểu "BẢNG TỔNG HỢP KHỐI LƯỢNG
+    BỆ TRỤ T1" (tiêu đề khớp BoQ, cột lại là cột thép): tiêu đề +'KHỐI LƯỢNG' cho BoQ 55
+    điểm, trong khi thép không có từ khóa tiêu đề nào. Cột 'KHỐI LƯỢNG ĐƠN VỊ KG/M' còn bị
+    đếm nhầm thành cột 'ĐƠN VỊ' của BoQ."""
+    def has(kws):
+        return any(kw in h for h in headers for kw in kws)
+    if not has(["DUONG KINH", "DRONG KINH", "D (MM)", "D(MM)", "PHI", "FI"]):
+        return False
+    sig = sum(1 for kws in (
+        ["CHIEU DAI", "CHIEU DI", "L (MM)", "L(MM)", "LENGTH"],
+        ["SO LUONG THANH", "SO THANH", "SO LUONG"],
+        ["KG/M", "KG/ M", "TRONG LUONG DON VI"],
+        ["TEN THANH", "KY HIEU", "MARK", "SO HIEU"],
+    ) if has(kws))
+    return sig >= 2 and has(["CHIEU DAI", "CHIEU DI", "L (MM)", "L(MM)", "LENGTH"])
+
+
+def _find_weight_col(headers: List[str], keywords: List[str]) -> Optional[int]:
+    """Chọn cột KHỐI LƯỢNG của cả nhóm thanh, KHÔNG lấy cột khối lượng đơn vị.
+
+    Bảng thống kê cốt thép thường có đồng thời 'KHỐI LƯỢNG ĐƠN VỊ KG/M' (trọng lượng
+    một mét) và 'KHỐI LƯỢNG KG' (cả nhóm thanh). Nếu bắt nhầm cột đơn vị thì mọi dòng
+    đều bị báo lệch trọng lượng sai và cột tổng của bảng sai hoàn toàn — đo trên bảng
+    BỆ TRỤ T1: lấy nhầm cột kg/m cho tổng 22.94 kg trong khi bảng ghi 16 177.83 kg."""
+    unit_kws = ["DON VI", "DONVI", "KG/M", "KG/ M", "UNIT", "/M"]
+    first = None
+    for i, h in enumerate(headers):
+        if not any(kw in h for kw in keywords):
+            continue
+        if first is None:
+            first = i
+        if any(u in h for u in unit_kws):
+            continue
+        return i
+    return first          # chỉ có cột đơn vị -> vẫn dùng, còn hơn không có gì
+
+
+_DIA_CELL_RE = re.compile(r"^\s*(?:D|Φ|Ø|Đ|d|ñ|fi|phi)?\s*(\d+(?:[.,]\d+)?)\s*(?:mm)?\s*$", re.IGNORECASE)
+
+
+def _parse_dia_cell(val: Any) -> Optional[float]:
+    """Đọc ô ĐƯỜNG KÍNH, chỉ nhận khi ô THỰC SỰ là số đường kính.
+
+    Không dùng _extract_number trực tiếp: nó bắt chữ số nằm lẫn trong nhãn, biến
+    các dòng tổng hợp / dòng khối lượng khác thành 'thanh thép' giả — đo trên bảng
+    BỆ TRỤ T1: 'BETONGBETRYC30' -> Φ30, 'QUẾT BITUM 2 LỚP' -> Φ2, và chúng còn
+    làm nhiễm biến truyền đường kính gộp của các dòng sau."""
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        return float(val)
+    m = _DIA_CELL_RE.match(str(val))
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", "."))
+    except ValueError:
+        return None
+
+
 def _extract_number(val: Any) -> Optional[float]:
     if val is None:
         return None
@@ -319,6 +385,9 @@ class AECTableClassifier:
         if tb_hits >= 2:
             return CAT_TITLE_BLOCK, CATEGORY_METADATA[CAT_TITLE_BLOCK]["name"], 0.99
 
+        # Chữ ký cột cốt thép (xem _has_rebar_signature) — dùng cho cả điểm thép và BoQ
+        rebar_signature = _has_rebar_signature(headers)
+
         # 1. Điểm số Thống kê Cốt thép
         rebar_score = 0
         if any(kw in title for kw in cls.REBAR_TITLE_KEYWORDS):
@@ -329,6 +398,10 @@ class AECTableClassifier:
         raw_header = " ".join(str(h) for h in (table.get("header") or []))
         if any(c in raw_header for c in ["Φ", "φ", "Ø", "ø", "Fi", "fi"]):
             rebar_score += 40
+        # Chữ ký cột → bảng thép chắc chắn, không phụ thuộc từ khóa tiêu đề.
+        # Xem _has_rebar_signature: bảng BoQ không bao giờ có cột đường kính thanh.
+        if rebar_signature:
+            rebar_score += 70
 
         # 2. Điểm số BoQ Khối lượng
         boq_score = 0
@@ -336,6 +409,10 @@ class AECTableClassifier:
             boq_score += 55
         boq_hits = sum(1 for kw in cls.BOQ_COL_KEYWORDS if kw in header_text)
         boq_score += boq_hits * 14
+        # Bảng có chữ ký cột cốt thép thì không thể là BoQ, dù tiêu đề ghi 'KHỐI LƯỢNG':
+        # tiêu đề "TỔNG HỢP KHỐI LƯỢNG" của bảng BBS nghĩa là tổng hợp thép.
+        if rebar_signature:
+            boq_score -= 60
 
         # 3. Điểm số Danh mục bản vẽ
         index_score = 0
@@ -401,7 +478,7 @@ class AECTableAuditor:
         col_len = cls._find_col(headers, ["CHIEU DAI", "CHIEU DI", "CD (MM)", "CD(MM)", "CD (M)", "LENGTH", "L (MM)", "L(MM)"])
         col_qty = cls._find_col(headers, ["SO LUONG", "SO THANH", "SOLURGNG", "QTY", "SL"])
         col_tot_len = cls._find_col(headers, ["TONG CHIEU DAI", "TONG CD", "TOTAL LENGTH"])
-        col_weight = cls._find_col(headers, ["TRONG LUONG", "KHOI LUONG", "WEIGHT", "KG"])
+        col_weight = _find_weight_col(headers, ["TRONG LUONG", "KHOI LUONG", "WEIGHT", "KG"])
         col_shape = cls._find_col(headers, ["HINH DANG", "SO DO UON", "CHI TIET UON", "HINH VE",
                                             "SO DO THANH", "SHAPE", "BENDING", "HINH"])
 
@@ -437,7 +514,7 @@ class AECTableAuditor:
             wt_raw = row[col_weight] if (col_weight is not None and col_weight < len(row)) else None
             mark_raw = row[col_mark] if (col_mark is not None and col_mark < len(row)) else f"Thanh {idx}"
 
-            dia = _extract_number(dia_raw)
+            dia = _parse_dia_cell(dia_raw)
             length, len_kind = parse_length_expr(len_raw, style)
             qty = _extract_number(qty_raw)
             weight = _extract_number(wt_raw)
