@@ -174,6 +174,53 @@ def test_is_caps_label():
 # ─────────────────────────────────────────────────────────────────────────────
 # Trình chạy độc lập (không cần pytest)
 # ─────────────────────────────────────────────────────────────────────────────
+# ── Lớp SỬA LỖI CHẮC CHẮN: chạy cả với dòng đã có dấu một phần ─────────────────
+# Đo trên Thông tư 13/2021: trước ~10 lỗi/1000 từ ('chi phi' x34, 'S6' x39...), vì dòng đã
+# có dấu bị bỏ qua nên không bao giờ được sửa. Sau: 0,6‰, mọi từ bị đổi đều đúng.
+def test_sua_loi_chac_chan_tren_dong_da_co_dau():
+    from vn_diacritics import restore_vietnamese_diacritics as R
+    cases = {
+        "Căn cứ Nghi định số 10/2021/NĐ-CP của Chính phủ về quản lý chi phi đầu tư xây dựng":
+            "Căn cứ Nghị định số 10/2021/NĐ-CP của Chính phủ về quản lý chi phí đầu tư xây dựng",
+        "Chi số giá xây dựng công trình được tính theo công thức sau":
+            "Chỉ số giá xây dựng công trình được tính theo công thức sau",
+        "Độc lập - Tự do - Hạnh phúc S6: 13/2021/TT-BXD Hà Nội": "Độc lập - Tự do - Hạnh phúc Số: 13/2021/TT-BXD Hà Nội",
+        "CÔNG BAO/S6 809 + 810/Ngày 19-9-2021": "CÔNG BÁO/Số 809 + 810/Ngày 19-9-2021",
+        "Tỷ trong bình quân của chi phí xây dựng, thiết bị": "Tỷ trọng bình quân của chi phí xây dựng, thiết bị",
+        "thay thế Phu lục số 5 của Thông tư của Bộ trường Bộ Xây dựng": "thay thế Phụ lục số 5 của Thông tư của Bộ trưởng Bộ Xây dựng",
+    }
+    for src, want in cases.items():
+        assert R(src) == want, (src, R(src))
+
+
+def test_sua_loi_chac_chan_khong_dung_vao_chu_dung():
+    """Các cụm có VẺ giống lỗi nhưng đúng tiếng Việt phải GIỮ NGUYÊN (khóa ngữ cảnh bằng lookahead)."""
+    from vn_diacritics import restore_vietnamese_diacritics as R
+    keep = [
+        "Chủ đầu tư chi số tiền 5 triệu đồng cho nhà thầu thi công",      # 'chi số tiền' = chi một số tiền
+        "Dự án có tổng vốn 10 tỷ trong năm 2026 theo kế hoạch",            # 'tỷ trong năm' = billion in year
+        "Phụ lục I ban hành kèm Nghị định số 10/2021/NĐ-CP, chi phí đầu tư xây dựng",
+        "Thứ trưởng Bộ Xây dựng ký, khối lượng thi công theo thiết kế",
+    ]
+    for t in keep:
+        assert R(t) == t, (t, R(t))
+
+
+def test_dau_tu_khong_thanh_dau_tu_dong_am():
+    """'dau tu' phải ra 'đầu tư' (trước đây 'đầu từ' vì từ điển chọn 'từ')."""
+    from vn_diacritics import restore_vietnamese_diacritics as R
+    assert R("chi phi dau tu xay dung") == "chi phí đầu tư xây dựng"
+    assert R("du an dau tu cong trinh giao thong").startswith("dự án đầu tư")
+
+
+def test_sua_loi_chac_chan_idempotent():
+    from vn_diacritics import apply_safe_fixes
+    t = "Căn cứ Nghi định số 10/2021/NĐ-CP, chi phi đầu từ xây dựng, Phu lục I, Chi số giá"
+    once = apply_safe_fixes(t)
+    assert apply_safe_fixes(once) == once
+    assert "Nghị định" in once and "chi phí" in once and "đầu tư xây" in once and "Phụ lục" in once
+
+
 def _run_standalone() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")

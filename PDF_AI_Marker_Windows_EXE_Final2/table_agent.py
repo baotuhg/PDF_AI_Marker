@@ -112,6 +112,26 @@ def _has_rebar_signature(headers: List[str]) -> bool:
     return sig >= 2 and has(["CHIEU DAI", "CHIEU DI", "L (MM)", "L(MM)", "LENGTH"])
 
 
+_QTY_TOTAL_KWS = ["T.BO", "T BO", "TBO", "TONG SO", "TOAN BO", "T. BO", "TONG", "TOTAL"]
+
+
+def _find_qty_col(headers: List[str], keywords: List[str]) -> Optional[int]:
+    """Chọn cột SỐ LƯỢNG dùng để tính TỔNG CHIỀU DÀI / TRỌNG LƯỢNG của cả bảng.
+
+    Bảng thống kê cốt thép hay có HAI cột số lượng: 'SỐ LƯỢNG 1CK' (một cấu kiện) và
+    'SỐ LƯỢNG T.BỘ' (toàn bộ). Các cột tổng chiều dài / trọng lượng tính theo T.BỘ,
+    nên lấy nhầm cột 1CK làm cả bảng báo lệch sai — đo trên bảng trang 22 hồ sơ Nhà 4:
+    dòng Φ14 dài 550, 1CK=9 nhưng T.BỘ=18, bảng ghi 9.9m; lấy 1CK ra 4.95m (báo sai)
+    còn lấy T.BỘ ra 9.90m (khớp). Đây là nguồn của 153 cảnh báo 'lệch tổng dài' giả."""
+    matches = [i for i, h in enumerate(headers) if any(kw in h for kw in keywords)]
+    if not matches:
+        return None
+    for i in matches:
+        if any(kw in headers[i] for kw in _QTY_TOTAL_KWS):
+            return i
+    return matches[0]
+
+
 def _find_weight_col(headers: List[str], keywords: List[str]) -> Optional[int]:
     """Chọn cột KHỐI LƯỢNG của cả nhóm thanh, KHÔNG lấy cột khối lượng đơn vị.
 
@@ -132,6 +152,108 @@ def _find_weight_col(headers: List[str], keywords: List[str]) -> Optional[int]:
     return first          # chỉ có cột đơn vị -> vẫn dùng, còn hơn không có gì
 
 
+def _looks_like_unit_weight(rows: List[List[Any]], col: int, col_dia: Optional[int],
+                            tol: float = 0.06, min_share: float = 0.6, min_rows: int = 3) -> bool:
+    """Cột có phải TRỌNG LƯỢNG ĐƠN VỊ (kg/m) không — xét theo DỮ LIỆU, không tin tiêu đề.
+
+    Tiêu đề hay bị OCR đọc hỏng ('Trọng lượng (kg/m)' -> '(u/ay)'), nên không nhận ra cột
+    kg/m và lấy nhầm làm cột khối lượng cả nhóm thanh: mọi dòng bị báo lệch sai (bảng
+    ghi 3.9kg vs tính 880kg — 3.85 chính là kg/m của Φ25). Cột kg/m có đặc điểm rất rõ:
+    giá trị trên từng dòng ≈ trọng lượng TCVN của đường kính dòng đó."""
+    if col_dia is None:
+        return False
+    hit = tot = 0
+    last_dia = None
+    for row in rows:
+        d = _parse_dia_cell(row[col_dia]) if col_dia < len(row) else None
+        if d is None:
+            d = last_dia
+        else:
+            last_dia = d
+        v = _extract_number(row[col]) if col < len(row) else None
+        if d is None or v is None:
+            continue
+        uw = TCVN_REBAR_WEIGHTS.get(int(round(d)))
+        if not uw:
+            continue
+        tot += 1
+        if abs(v - uw) / uw <= tol:
+            hit += 1
+    return tot >= min_rows and hit / tot >= min_share
+
+
+def _pick_weight_col(headers: List[str], keywords: List[str], rows: List[List[Any]],
+                     col_dia: Optional[int]) -> Optional[int]:
+    """Chọn cột KHỐI LƯỢNG CẢ NHÓM THANH. Ưu tiên: có chữ 'TỔNG' > không phải cột đơn vị
+    > cột đầu tiên. Cột đơn vị nhận diện bằng cả tiêu đề LẪN dữ liệu (xem trên)."""
+    unit_kws = ("DON VI", "DONVI", "KG/M", "KG/ M", "UNIT", "/M")
+    cands = [i for i, h in enumerate(headers) if any(kw in h for kw in keywords)]
+    if not cands:
+        return None
+
+    def is_unit(i):
+        return any(u in headers[i] for u in unit_kws) or _looks_like_unit_weight(rows, i, col_dia)
+
+    good = [i for i in cands if not is_unit(i)]
+    for i in good:
+        if "TONG" in headers[i]:
+            return i
+    if good:
+        return good[0]
+    return cands[0]
+
+
+def _infer_len_units(rows: List[List[Any]], style: str, col_dia: Optional[int],
+                     col_len: Optional[int], col_qty_all: List[int], col_tot_len: Optional[int],
+                     col_weight: Optional[int], len_unit: Optional[str], tl_unit: Optional[str]):
+    """Suy đơn vị cột 'chiều dài thanh' & 'tổng chiều dài' khi tiêu đề mất đơn vị
+    ('Chiều dài (oan)', 'Tổng chiều dài ()' do OCR hỏng).
+
+    Không đoán theo độ lớn: thử các đơn vị rồi chọn cách làm bảng TỰ NHẤT QUÁN nhất
+    (chiều dài × số lượng ≈ tổng chiều dài; × kg/m TCVN ≈ khối lượng). Chỉ áp dụng khi
+    đủ bằng chứng; ngược lại giữ nguyên (len_unit, tl_unit) đầu vào."""
+    if col_len is None or (len_unit and (col_tot_len is None or tl_unit)):
+        return len_unit, tl_unit
+    samples, last_dia = [], None
+    for row in rows:
+        d = _parse_dia_cell(row[col_dia]) if (col_dia is not None and col_dia < len(row)) else None
+        if d is None:
+            d = last_dia
+        else:
+            last_dia = d
+        L, kind = parse_length_expr(row[col_len] if col_len < len(row) else None, style)
+        if L is None or L <= 0 or kind == "symbolic" or d is None:
+            continue
+        qs = [q for q in (_extract_number(row[c]) if c < len(row) else None for c in col_qty_all) if q and q > 0]
+        TL = None
+        if col_tot_len is not None and col_tot_len < len(row):
+            TL, _k = parse_length_expr(row[col_tot_len], style)
+        W = _extract_number(row[col_weight]) if (col_weight is not None and col_weight < len(row)) else None
+        uw = TCVN_REBAR_WEIGHTS.get(int(round(d)))
+        if qs and (TL or W):
+            samples.append((L, qs, TL, W, uw))
+    if len(samples) < 3:
+        return len_unit, tl_unit
+    cand_len = [len_unit] if len_unit else ["mm", "cm", "m"]
+    cand_tl = [tl_unit] if (tl_unit or col_tot_len is None) else ["m", "mm", "cm"]
+    best, best_score = None, -1
+    for ul in cand_len:
+        for ut in cand_tl:
+            score = 0
+            for L, qs, TL, W, uw in samples:
+                lm = _len_to_meters(L, ul)
+                if TL and ut is not None and any(abs(lm * q - _len_to_meters(TL, ut)) <= 0.03 * lm * q + 0.011 for q in qs):
+                    score += 1
+                if W and uw and any(abs(lm * q * uw - W) <= 0.08 * W for q in qs):
+                    score += 1
+            if score > best_score:             # hòa -> giữ ứng viên đứng trước (mm, m)
+                best, best_score = (ul, ut), score
+    need = 0.5 * len(samples) * (2 if (col_tot_len is not None and col_weight is not None) else 1)
+    if best is None or best_score < max(3, need):
+        return len_unit, tl_unit
+    return best
+
+
 _DIA_CELL_RE = re.compile(r"^\s*(?:D|Φ|Ø|Đ|d|ñ|fi|phi)?\s*(\d+(?:[.,]\d+)?)\s*(?:mm)?\s*$", re.IGNORECASE)
 
 
@@ -145,14 +267,51 @@ def _parse_dia_cell(val: Any) -> Optional[float]:
     if val is None:
         return None
     if isinstance(val, (int, float)):
-        return float(val)
+        return _plausible_dia(float(val))
     m = _DIA_CELL_RE.match(str(val))
     if not m:
         return None
     try:
-        return float(m.group(1).replace(",", "."))
+        return _plausible_dia(float(m.group(1).replace(",", ".")))
     except ValueError:
         return None
+
+
+def _plausible_dia(v: float) -> Optional[float]:
+    """Đường kính thép thực tế ~3–60mm. Giá trị khác (0,888 / 1,208 là kg/m của cột bên
+    cạnh) KHÔNG phải đường kính — trước đây thành 'Φ1' rồi sinh cảnh báo lệch giả.
+    Giữ lại 0 để nhánh 'đường kính không đọc được' (vd 'D8' -> '00') vẫn cờ."""
+    if v == 0 or 3 <= v <= 60:
+        return v
+    return None
+
+
+# Ô 'chiều dài' thực chất là CHÚ THÍCH/chú giải đường kính (D12, D>18, 10<D<18, D<10mm), không
+# phải chiều dài thanh -> không phải 'hình học phức tạp'.
+_DIA_LEGEND_RE = re.compile(r"^\s*(?:\d+\s*[<>≤≥]\s*)?[DΦØĐ]\s*(?:[<>≤≥=]\s*)?\d*\s*(?:mm)?\s*$", re.IGNORECASE)
+
+_DIA_PREFIX_RE = re.compile(r"^\s*(?:D|Φ|Ø|Đ|phi)\s*\d+", re.IGNORECASE)
+
+
+def _pick_dia_col(headers: List[str], rows: List[List[Any]], col_dia: Optional[int]) -> Optional[int]:
+    """Xác nhận cột ĐƯỜNG KÍNH bằng dữ liệu. Tiêu đề gộp ô ('Ký hiệu Đường kính KL đơn
+    vị' dồn vào 1 ô) làm cột chọn theo tiêu đề trỏ nhầm sang cột kg/m. Nếu cột chọn có
+    < 50% ô đọc được như đường kính, tìm cột khác có >= 60% ô dạng 'D12/Φ16'."""
+    def share(c, strict):
+        vals = [row[c] for row in rows if c < len(row) and str(row[c]).strip()]
+        if len(vals) < 3:
+            return 0.0
+        ok = sum(1 for v in vals if (_DIA_PREFIX_RE.match(str(v)) if strict else _parse_dia_cell(v) is not None))
+        return ok / len(vals)
+    if col_dia is not None and share(col_dia, False) >= 0.5:
+        return col_dia
+    ncols = max((len(r) for r in rows), default=0)
+    best, best_share = None, 0.6
+    for c in range(ncols):
+        sh = share(c, True)
+        if sh >= best_share:
+            best, best_share = c, sh
+    return best if best is not None else col_dia
 
 
 def _extract_number(val: Any) -> Optional[float]:
@@ -160,7 +319,12 @@ def _extract_number(val: Any) -> Optional[float]:
         return None
     if isinstance(val, (int, float)):
         return float(val)
-    s = str(val).strip().replace(" ", "").replace(",", ".")
+    s = str(val).strip().replace(" ", "")
+    if "." in s and "," in s:
+        dec = "," if s.rfind(",") > s.rfind(".") else "."
+        s = s.replace("." if dec == "," else ",", "").replace(dec, ".")
+    else:
+        s = s.replace(",", ".")
     m = re.search(r"[-+]?\d*\.?\d+", s)
     if m:
         try:
@@ -178,6 +342,15 @@ def _num_token(tok: str, style: str = "unknown") -> Optional[float]:
     if "." in tok and "," in tok:
         dec = "," if tok.rfind(",") > tok.rfind(".") else "."
         tok = tok.replace("." if dec == "," else ",", "").replace(dec, ".")
+    elif style != "us" and re.fullmatch(r"\d{1,3}(?:,\d{3})+,\d{1,2}", tok):
+        # '7,900,00': OCR đọc DẤU CHẤM nghìn của '7.900,00' thành dấu phẩy. Hai dấu phẩy,
+        # nhóm cuối 1–2 chữ số => dấu cuối là thập phân, các dấu trước là phân nghìn.
+        # (Trước đây thành 790000 — sai ×100 và lọt thẳng vào file nạp optimizer.)
+        head, dec = tok.rsplit(",", 1)
+        tok = head.replace(",", "") + "." + dec
+    elif style != "us" and re.fullmatch(r"\d{1,3}(?:\.\d{3})+\.\d{1,2}", tok):
+        head, dec = tok.rsplit(".", 1)
+        tok = head.replace(".", "") + "." + dec
     elif "," in tok:
         if tok.count(",") == 1 and len(tok.split(",")[-1]) <= 2 and style != "us":
             tok = tok.replace(",", ".")
@@ -473,18 +646,47 @@ class AECTableAuditor:
         if not headers or not rows:
             return
 
-        col_mark = cls._find_col(headers, ["KY HIEU", "TEN THANH", "SO HIEU", "MARK", "STT"])
+        # Ưu tiên theo THỨ TỰ từ khóa (không theo thứ tự cột): bảng có cả 'STT' và 'Tên thanh'
+        # phải lấy tên thanh (A1, W3...) làm nhãn cảnh báo, không phải số thứ tự.
+        col_mark = next((c for c in (cls._find_col(headers, [kw]) for kw in
+                                     ("KY HIEU", "TEN THANH", "SO HIEU", "MARK", "STT")) if c is not None), None)
         col_dia = cls._find_col(headers, ["DUONG KINH", "DRONG KINH", "DK", "PHI", "FI", "DIA", "D (MM)", "D(MM)", "D="])
+        col_dia_hdr = col_dia
+        col_dia = _pick_dia_col(headers, rows, col_dia)
+        if col_dia_hdr is not None and col_dia != col_dia_hdr:
+            # Cột đường kính chọn theo tiêu đề không chứa đường kính thật => tiêu đề đã bị gộp
+            # ô/hỏng; các cột khác (chiều dài, số lượng, khối lượng) chọn theo tiêu đề cũng
+            # không đáng tin. Thẩm tra theo ánh xạ sai chỉ sinh cảnh báo giả (đo trên bảng
+            # trang 31 hồ sơ cầu: Φ1, tổng lệch 120%), nên cờ MỘT dòng trung thực rồi dừng.
+            msg = ("Tiêu đề bảng bị gộp ô/đọc hỏng nên không xác định được các cột — "
+                   "không thẩm tra tự động được, cần đối chiếu bản vẽ.")
+            result["warnings"].append(f"Bảng: {msg}")
+            result.setdefault("warnings_detail", []).append(
+                {"page": table.get("page", 1), "sheet": table.get("sheet", ""), "row": 0,
+                 "mark": "TIÊU ĐỀ BẢNG", "kind": "tieu_de_khong_tin_cay", "message": msg, "bbox": None})
+            result["status"] = "warning"
+            return
         col_len = cls._find_col(headers, ["CHIEU DAI", "CHIEU DI", "CD (MM)", "CD(MM)", "CD (M)", "LENGTH", "L (MM)", "L(MM)"])
-        col_qty = cls._find_col(headers, ["SO LUONG", "SO THANH", "SOLURGNG", "QTY", "SL"])
+        col_qty = _find_qty_col(headers, ["SO LUONG", "SO THANH", "SOLURGNG", "QTY", "SL"])
+        # Mọi cột số lượng của bảng. Ô gộp bị tách khiến bảng có nhiều cột cùng tên
+        # ('SỐ LƯỢNG 1CK' xuất hiện 2–3 lần) và mỗi dòng chỉ MỘT cột có dữ liệu, tùy
+        # vị trí ô gộp. Thẩm tra theo một cột duy nhất sẽ báo lệch sai ở những dòng
+        # mà cột đó trống — đo trên hồ sơ Nhà 14: 55/58 cảnh báo là loại này.
+        # Nên thử TẤT CẢ cột, chỉ báo lệch khi KHÔNG cột nào khớp.
+        col_qty_all = [i for i, h in enumerate(headers)
+                       if any(k in h for k in ("SO LUONG", "SO THANH", "SOLURGNG", "QTY", "SL"))]
         col_tot_len = cls._find_col(headers, ["TONG CHIEU DAI", "TONG CD", "TOTAL LENGTH"])
-        col_weight = _find_weight_col(headers, ["TRONG LUONG", "KHOI LUONG", "WEIGHT", "KG"])
+        col_weight = _pick_weight_col(headers, ["TRONG LUONG", "KHOI LUONG", "WEIGHT", "KG"], rows, col_dia)
         col_shape = cls._find_col(headers, ["HINH DANG", "SO DO UON", "CHI TIET UON", "HINH VE",
                                             "SO DO THANH", "SHAPE", "BENDING", "HINH"])
 
         style = table.get("number_style", "unknown")
         cell_boxes = table.get("cell_boxes") or []
         len_unit = _detect_len_unit(headers[col_len]) if col_len is not None else None
+        tl_unit_hdr = _detect_len_unit(headers[col_tot_len]) if col_tot_len is not None else None
+        len_unit, tl_unit_hdr = _infer_len_units(rows, style, col_dia, col_len, col_qty_all or
+                                                 ([col_qty] if col_qty is not None else []),
+                                                 col_tot_len, col_weight, len_unit, tl_unit_hdr)
         page = table.get("page", 1)
         sheet = table.get("sheet", "")
         detail = result.setdefault("warnings_detail", [])
@@ -504,6 +706,8 @@ class AECTableAuditor:
 
         total_weight_reported = 0.0
         total_weight_calculated = 0.0
+        cmp_calc = 0.0                       # tổng tính CHỈ trên các dòng bảng có ghi khối lượng
+        empty_w = []                         # dòng tính được nhưng ô khối lượng trống
         weight_by_group = {"d_le_10": 0.0, "d_le_18": 0.0, "d_gt_18": 0.0}
         last_dia = None                       # để truyền ô ĐƯỜNG KÍNH gộp theo hàng
 
@@ -529,6 +733,15 @@ class AECTableAuditor:
                 continue
 
             dia_int = int(round(dia))
+            if dia_int <= 0:
+                # Ô đường kính bị OCR đọc hỏng (vd 'D8' -> '00'). Không thể thẩm tra
+                # thanh thép khi chưa biết đường kính: tính theo Φ0 cho ra 0 kg rồi
+                # báo 'lệch trọng lượng' vô nghĩa. Gắn cờ để người dùng đối chiếu
+                # rồi BỎ QUA dòng này, không đưa vào danh mục cốt thép.
+                _flag("duong_kinh_khong_doc_duoc", idx, mark_raw,
+                      f"Không đọc được đường kính (ô ghi '{str(dia_raw).strip()}') — "
+                      f"cần đối chiếu bản vẽ.", col_dia)
+                continue
             if dia_int not in TCVN_REBAR_WEIGHTS:
                 _flag("duong_kinh_la", idx, mark_raw,
                       f"Đường kính Φ{dia_int} ngoài TCVN (có thể OCR đọc lệch).", col_dia)
@@ -547,7 +760,7 @@ class AECTableAuditor:
                           f"Chiều dài khai triển SUY từ hình dạng (Σ {len(shape_segs)} đoạn = "
                           f"{length:.0f}mm = {'+'.join(str(int(s)) for s in shape_segs)}). "
                           f"Cần kiểm tra bù uốn/móc & loại góc.", col_shape)
-                elif len_kind == "symbolic":
+                elif len_kind == "symbolic" and not _DIA_LEGEND_RE.match(str(len_raw or "")):
                     _flag("hinh_hoc_phuc_tap", idx, mark_raw,
                           f"Chiều dài dạng công thức/biến ('{str(len_raw).strip()}') và không suy được "
                           f"từ hình dạng — cần đối chiếu bản vẽ để tính khai triển.", col_len)
@@ -566,22 +779,41 @@ class AECTableAuditor:
                 else:
                     weight_by_group["d_gt_18"] += calc_weight
 
+                if weight is None or weight == 0:
+                    if col_weight is not None:
+                        empty_w.append((idx, mark_raw, calc_weight))
                 if weight is not None and weight > 0:
                     total_weight_reported += weight
+                    cmp_calc += calc_weight
                     if abs(weight - calc_weight) / weight > 0.08:
                         _flag("lech_trong_luong", idx, mark_raw,
                               f"Bảng ghi {weight:.1f}kg, tính toán TCVN {calc_weight:.1f}kg "
                               f"(Φ{dia_int}×{calc_len_m:.2f}m, lệch >8%).", col_weight)
 
-                # (4) Đối chiếu cột 'Tổng chiều dài' nếu có
+                # (4) Đối chiếu cột 'Tổng chiều dài' nếu có.
+                # Đơn vị phải đọc từ CHÍNH tiêu đề cột này, không dùng len_unit của cột
+                # 'chiều dài thanh': bảng thường ghi 'CHIỀU DÀI THANH (MM)' cạnh
+                # 'TỔNG CHIỀU DÀI (M)'. Lấy nhầm mm cho cột mét thì mọi dòng đều bị
+                # chia 1000 lần nữa và báo lệch sai — đo trên bảng trang 24 hồ sơ
+                # Nhà 14: bảng ghi 109.2m, tính đúng là 109.2m nhưng bị đổi thành
+                # 0.11m nên sinh cảnh báo 'lệch tổng dài' giả cho gần như mọi dòng.
                 if col_tot_len is not None and col_tot_len < len(row):
                     tl, _k = parse_length_expr(row[col_tot_len], style)
                     if tl is not None and tl > 0:
-                        tl_m = _len_to_meters(tl, len_unit)
+                        tl_unit = tl_unit_hdr
+                        if tl_unit is None:
+                            tl_unit = len_unit
+                        tl_m = _len_to_meters(tl, tl_unit)
                         if abs(tl_m - calc_len_m) / max(tl_m, calc_len_m) > 0.08:
                             _flag("lech_tong_dai", idx, mark_raw,
                                   f"Tổng chiều dài ghi {tl_m:.2f}m ≠ (chiều dài×số lượng)={calc_len_m:.2f}m.",
                                   col_tot_len)
+                    elif tl == 0:
+                        # Ô tổng ghi 0 trong khi dài×SL > 0: gần như chắc là OCR đọc hỏng ô
+                        # (vd '7,00' -> '0'); trước đây bị bỏ qua im lặng.
+                        _flag("o_tong_dai_bang_0", idx, mark_raw,
+                              f"Ô tổng chiều dài ghi 0 nhưng chiều dài×số lượng={calc_len_m:.2f}m — "
+                              f"nghi OCR đọc sai ô, cần đối chiếu bản vẽ.", col_tot_len)
                 result["rebar_items"].append({
                     "mark": str(mark_raw),
                     "diameter": dia_int,
@@ -595,12 +827,21 @@ class AECTableAuditor:
                     "sheet_title": table.get("sheet_title", ""),
                 })
 
-        # Kiểm tra chéo Ở MỨC BẢNG: tổng ghi vs tổng tính
-        if total_weight_reported > 0 and total_weight_calculated > 0:
-            diff = abs(total_weight_reported - total_weight_calculated) / total_weight_reported
+        # Ô khối lượng trống: số có thể bị trượt sang ô bên cạnh (vd cột Ghi chú) hoặc OCR bỏ sót.
+        # Chỉ cờ khi bảng CÓ ghi khối lượng ở các dòng khác (nếu cả cột trống thì cột không dùng).
+        if total_weight_reported > 0 and empty_w and len(empty_w) <= max(5, int(0.3 * len(rows))):
+            for idx_e, mark_e, calc_e in empty_w:
+                _flag("o_khoi_luong_trong", idx_e, mark_e,
+                      f"Ô khối lượng trống nhưng tính TCVN được {calc_e:.1f}kg — số có thể bị trượt "
+                      f"sang ô bên cạnh hoặc OCR bỏ sót, cần đối chiếu bản vẽ.", col_weight)
+
+        # Kiểm tra chéo Ở MỨC BẢNG: tổng ghi vs tổng tính (so THEO CẶP dòng có đủ hai số —
+        # dòng bị trống ô khối lượng đã được cờ riêng ở trên, không để nó làm lệch cả bảng).
+        if total_weight_reported > 0 and cmp_calc > 0:
+            diff = abs(total_weight_reported - cmp_calc) / total_weight_reported
             if diff > 0.05:
                 msg = (f"Tổng trọng lượng bảng ghi {total_weight_reported:.1f}kg ≠ tổng tính toán "
-                       f"{total_weight_calculated:.1f}kg (lệch {diff*100:.1f}%).")
+                       f"{cmp_calc:.1f}kg (lệch {diff*100:.1f}%).")
                 result["warnings"].append(msg)
                 detail.append({"page": page, "sheet": sheet, "row": 0, "mark": "TỔNG BẢNG",
                                "kind": "lech_tong_bang", "message": msg, "bbox": None})

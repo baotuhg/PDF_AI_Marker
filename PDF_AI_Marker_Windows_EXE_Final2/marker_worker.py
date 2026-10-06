@@ -489,6 +489,9 @@ def _write_numeric_audit_report(tables, path):
         "lech_tong_dai": "Lệch tổng chiều dài (≠ dài×số lượng)",
         "lech_tong_bang": "Lệch tổng trọng lượng toàn bảng",
         "khai_trien_tu_hinh": "Chiều dài khai triển SUY TỪ HÌNH DẠNG (SHX) — cần kiểm tra bù uốn/móc",
+        "o_tong_dai_bang_0": "Ô tổng chiều dài ghi 0 — nghi OCR đọc sai ô",
+        "o_khoi_luong_trong": "Ô khối lượng trống — số có thể trượt sang ô bên cạnh / OCR bỏ sót",
+        "tieu_de_khong_tin_cay": "Tiêu đề bảng bị gộp ô/hỏng — không thẩm tra tự động được",
     }
     rows = [d for t in tables for d in (t.get("audit", {}) or {}).get("warnings_detail", [])]
     out = ["# KIỂM TRA SỐ LIỆU BẢNG (TỰ ĐỘNG ĐỐI CHIẾU)", "",
