@@ -399,7 +399,7 @@ class AECTableAuditor:
         col_mark = cls._find_col(headers, ["KY HIEU", "TEN THANH", "SO HIEU", "MARK", "STT"])
         col_dia = cls._find_col(headers, ["DUONG KINH", "DRONG KINH", "DK", "PHI", "FI", "DIA", "D (MM)", "D(MM)", "D="])
         col_len = cls._find_col(headers, ["CHIEU DAI", "CHIEU DI", "CD (MM)", "CD(MM)", "CD (M)", "LENGTH", "L (MM)", "L(MM)"])
-        col_qty = cls._find_col(headers, ["SO LUONG", "SO THANH", "SOLURGNG", "QTY", "SL"])
+        cols_qty = cls._find_cols(headers, ["SO LUONG", "SO THANH", "SOLURGNG", "QTY", "SL"])
         col_tot_len = cls._find_col(headers, ["TONG CHIEU DAI", "TONG CD", "TOTAL LENGTH"])
         col_weight = cls._find_col(headers, ["TRONG LUONG", "KHOI LUONG", "WEIGHT", "KG"])
         col_shape = cls._find_col(headers, ["HINH DANG", "SO DO UON", "CHI TIET UON", "HINH VE",
@@ -433,13 +433,20 @@ class AECTableAuditor:
         for idx, row in enumerate(rows, 1):
             dia_raw = row[col_dia] if (col_dia is not None and col_dia < len(row)) else None
             len_raw = row[col_len] if (col_len is not None and col_len < len(row)) else None
-            qty_raw = row[col_qty] if (col_qty is not None and col_qty < len(row)) else None
             wt_raw = row[col_weight] if (col_weight is not None and col_weight < len(row)) else None
             mark_raw = row[col_mark] if (col_mark is not None and col_mark < len(row)) else f"Thanh {idx}"
 
             dia = _extract_number(dia_raw)
             length, len_kind = parse_length_expr(len_raw, style)
-            qty = _extract_number(qty_raw)
+            
+            qty = None
+            for cq in cols_qty:
+                if cq < len(row):
+                    q_val = _extract_number(row[cq])
+                    if q_val is not None:
+                        qty = q_val
+                        break
+                        
             weight = _extract_number(wt_raw)
 
             # (2) Truyền ô gộp theo HÀNG: dòng có dữ liệu nhưng trống đường kính
@@ -542,14 +549,21 @@ class AECTableAuditor:
     def _audit_boq(cls, table: Dict[str, Any], result: Dict[str, Any]):
         headers = [_strip_accents(str(h)) for h in (table.get("header") or [])]
         rows = table.get("rows") or []
-        col_qty = cls._find_col(headers, ["KHOI LUONG", "KHOI LUONG THIET KE", "QTY", "KL"])
+        cols_qty = cls._find_cols(headers, ["KHOI LUONG", "KHOI LUONG THIET KE", "QTY", "KL"])
         col_price = cls._find_col(headers, ["DON GIA", "UNIT PRICE", "GIA"])
         col_amount = cls._find_col(headers, ["THANH TIEN", "TOTAL AMOUNT", "TONG TIEN"])
 
         total_amount = 0.0
         for idx, row in enumerate(rows, 1):
-            if col_qty is not None and col_price is not None and col_amount is not None:
-                q = _extract_number(row[col_qty]) if col_qty < len(row) else None
+            if cols_qty and col_price is not None and col_amount is not None:
+                q = None
+                for cq in cols_qty:
+                    if cq < len(row):
+                        q_val = _extract_number(row[cq])
+                        if q_val is not None:
+                            q = q_val
+                            break
+                            
                 p = _extract_number(row[col_price]) if col_price < len(row) else None
                 a = _extract_number(row[col_amount]) if col_amount < len(row) else None
                 if q is not None and p is not None and a is not None:
@@ -569,6 +583,10 @@ class AECTableAuditor:
             if any(kw in h for kw in keywords):
                 return i
         return None
+
+    @staticmethod
+    def _find_cols(headers: List[str], keywords: List[str]) -> List[int]:
+        return [i for i, h in enumerate(headers) if any(kw in h for kw in keywords)]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
