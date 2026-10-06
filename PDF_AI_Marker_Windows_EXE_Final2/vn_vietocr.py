@@ -67,8 +67,18 @@ class VietOCRRecognizer:
         n = threads or int(os.environ.get("PDF_AI_VIETOCR_THREADS", "0")) or min(6, max(2, (os.cpu_count() or 4) // 2))
         so.intra_op_num_threads = n
         so.inter_op_num_threads = 1
-        # Vòng giải mã gồm hàng trăm lượt gọi nhỏ -> CPU nhanh & ổn định hơn GPU DirectML.
-        prov = ["CPUExecutionProvider"]
+        # Chọn execution provider: PDF_AI_VIETOCR_EP = cpu (mặc định) | dml | auto
+        #   dml / auto: dùng DirectML nếu máy có GPU (đo thực tế RTX 4070 nhanh ~2.3x
+        #   so với CPU, output khớp tuyệt đối). Mặc định cpu để an toàn với GPU yếu/iGPU
+        #   (lô giải mã nhỏ có thể bị overhead DirectML lấn át trên card yếu).
+        _ep = os.environ.get("PDF_AI_VIETOCR_EP", "cpu").strip().lower()
+        _avail = ort.get_available_providers()
+        if _ep in ("dml", "directml", "auto") and "DmlExecutionProvider" in _avail:
+            prov = ["DmlExecutionProvider", "CPUExecutionProvider"]
+        elif _ep in ("cuda", "gpu") and "CUDAExecutionProvider" in _avail:
+            prov = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        else:
+            prov = ["CPUExecutionProvider"]
         self.enc = ort.InferenceSession(str(model_dir / "encoder.onnx"), so, providers=prov)
         self.dec = ort.InferenceSession(str(model_dir / "decoder.onnx"), so, providers=prov)
 

@@ -632,6 +632,7 @@ AEC_CONTEXT_RULES: List[Tuple[str, str]] = [
     # (nếu để sau các luật gắn-mã-hiệu thì "da dam" bị "dam …" xén mất → sai thành "đã dầm")
     (r"\bda\s+(\d+\s*x\s*\d+)\b", r"đá \1"),   # đá 1x2, đá 4x6
     (r"\bda\s+dam\b", "đá dăm"),
+    (r"\bdau\s+tu\b", "đầu tư"),            # 'đầu tư' (không phải 'đầu từ' — lỗi đồng âm tu/từ/tư)
     (r"\bda\s+hoc\b", "đá hộc"),
     (r"\bda\s+base\b", "đá base"),
     (r"\bda\s+1\s*x\s*2\b", "đá 1x2"),
@@ -716,6 +717,63 @@ AEC_CONTEXT_RULES: List[Tuple[str, str]] = [
     (r"\bmau\b(?=\s+(?:xam|vang|nau|den|do|trang|xanh|ghi))", "màu"),
     (r"\blan\b(?=\s+(?:re|dam|san|soi|da|cat|bun|set))", "lẫn"),
 ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SỬA LỖI CHẮC CHẮN — chạy cho MỌI dòng, kể cả dòng đã có dấu một phần.
+#
+# Vì sao cần: OCR (kể cả VietOCR ghép lai) thường để lại lỗi dấu lẻ tẻ trong dòng nhìn
+# chung đã có dấu ('quản lý chi phi đầu tư', 'Phu lục', 'S6: 13/2021'). Dòng như vậy bị
+# line_already_accented() cho qua để tránh 'đoán dấu' làm hỏng chữ đúng, nên các lỗi này
+# KHÔNG BAO GIỜ được sửa (đo trên Thông tư 13/2021: ~10 lỗi / 1000 từ, lặp lại hàng chục
+# lần: 'chi phi' ×34, 'S6' ×39).
+#
+# Điều kiện bắt buộc của mọi luật ở đây: DẠNG SAI không bao giờ là tiếng Việt đúng ở bất
+# kỳ ngữ cảnh nào (hoặc ngữ cảnh được khóa bằng lookahead). Không có luật 'đoán' nào.
+# ─────────────────────────────────────────────────────────────────────────────
+SAFE_FIX_RULES: List[Tuple[str, str]] = [
+    (r"\bchi phi\b", "chi phí"),
+    (r"\bPhu lục\b", "Phụ lục"),
+    (r"\bNgh[iị] đ[iịìỉĩ]nh\b", "Nghị định"),
+    (r"\bNghi đ[iịìỉĩ]nh\b", "Nghị định"),
+    (r"\bquy đình\b", "quy định"),
+    (r"\bđề nghi\b", "đề nghị"),
+    (r"\bthiết bi\b", "thiết bị"),
+    (r"\bBộ trường\b", "Bộ trưởng"),
+    (r"\bThư trưởng\b", "Thứ trưởng"),
+    (r"\bkhối lương\b", "khối lượng"),
+    (r"\bkhôi lượng\b", "khối lượng"),
+    (r"\bchi tiêu kinh tế\b", "chỉ tiêu kinh tế"),
+    (r"\bkêm theo\b", "kèm theo"),
+    (r"\bhướng dần\b", "hướng dẫn"),
+    (r"\bchiu trách nhiệm\b", "chịu trách nhiệm"),
+    (r"\bThông tur\b", "Thông tư"),
+    (r"\bcông bao\b", "công báo"),
+    # 'chi số' = 'chỉ số' chỉ khi đi trước các từ của cụm chỉ số giá ('chi số tiền' vẫn đúng)
+    (r"\bchi số(?= (?:giá|xây|phần|chung|trượt|điều|tổng|khu vực|bình))", "chỉ số"),
+    # 'tỷ trong' = 'tỷ trọng' (không phải '10 tỷ trong năm'): chỉ trước cụm của tỷ trọng
+    (r"\btỷ trong(?= (?:bình quân|của (?:chi|phần|vốn|từng)))", "tỷ trọng"),
+    # 'tai' = 'tại' khi đứng trước tên văn bản / đơn vị văn bản
+    (r"\btai(?= (?:Phụ|Phu|Mục|Điều|khoản|điểm|Thông|Nghị|Nghi|Luật|Quyết)\b)", "tại"),
+    # 'S6'/'s6'/'SO' = 'Số' khi đứng trước số hiệu văn bản (13/2021, 17/2019/TT) hoặc sau '/' + số
+    (r"\b[Ss][6O0]\b(?=\s*[:.]?\s*\d+/\d{2,4}\b)", "Số"),
+    (r"(?<=/)S[6O0](?=\s+\d)", "Số"),
+    # 'đầu từ' = 'đầu tư' trước cụm đầu tư xây dựng / dự án / công / phát triển
+    (r"\bđầu từ(?= (?:xây|công|dự|phát|hạ|nước|cơ))", "đầu tư"),
+]
+_SAFE_FIX_COMPILED: Optional[List[Tuple["re.Pattern", str]]] = None
+
+
+def apply_safe_fixes(text: str) -> str:
+    """Áp SAFE_FIX_RULES (giữ kiểu viết hoa của chỗ gốc). Idempotent, không đụng chữ đúng."""
+    global _SAFE_FIX_COMPILED
+    if not text:
+        return text
+    if _SAFE_FIX_COMPILED is None:
+        _SAFE_FIX_COMPILED = [(re.compile(p, re.IGNORECASE), r) for p, r in SAFE_FIX_RULES]
+    for comp, repl in _SAFE_FIX_COMPILED:
+        text = comp.sub(lambda m, r=repl: match_case(m.group(0), r), text)
+    return text
 
 
 def match_case(template: str, text: str) -> str:
@@ -929,9 +987,11 @@ class VietnameseDiacriticRestorer:
         # người dùng đã xác nhận. Tránh 'khe co giãn' -> 'khe có giãn', 'lan can' -> 'lân cận'.
         lines = text.split("\n")
         if any(line_already_accented(ln) for ln in lines):
-            return "\n".join(self._apply_corrections(ln) if line_already_accented(ln) else self._restore_raw(ln)
-                             for ln in lines)
-        return self._restore_raw(text)
+            out = "\n".join(self._apply_corrections(ln) if line_already_accented(ln) else self._restore_raw(ln)
+                            for ln in lines)
+        else:
+            out = self._restore_raw(text)
+        return apply_safe_fixes(out)        # sửa lỗi CHẮC CHẮN dù dòng đã có dấu hay chưa
 
     def _apply_corrections(self, text: str) -> str:
         for comp, corrected in self.correction_rules:
